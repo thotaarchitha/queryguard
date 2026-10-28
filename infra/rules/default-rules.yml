@@ -1,8 +1,12 @@
-# Starting rule set. The proxy loads this from Phase 3; from Phase 5 it only
-# seeds the config database and the admin API owns the rules.
+# QueryGuard starting policy.
 #
-# Evaluation: rules run in priority order (lowest first). The first BLOCK wins;
-# REWRITE rules stack.
+# The proxy reads this file directly when there's no config database. Once the admin
+# API is running, this only seeds the config DB on first start, and the API owns the rules.
+#
+# Rules run in priority order (lowest first). The first BLOCK wins; REWRITE rules stack.
+# Message placeholders: {cost} {rows} {statement} {function} {table} {role} {user}
+
+default_role: app
 
 role_mapping:
   postgres: admin
@@ -10,6 +14,14 @@ role_mapping:
   bob: app
   etl_user: etl
   report_ro: app_readonly
+
+settings:
+  # A statement JSqlParser can't read: reads go through, anything else is refused.
+  on_parse_error: allow_reads
+  # EXPLAIN failed or timed out: let it through and count it (see design-decisions.md).
+  on_cost_error: allow
+  explain_timeout_ms: 200
+  decision_timeout_ms: 1000
 
 rules:
   - id: R1
@@ -36,10 +48,20 @@ rules:
     name: block-risky-functions
     priority: 25
     when:
-      functions_any: [pg_sleep, pg_read_file, pg_read_binary_file, dblink, lo_import, lo_export]
+      functions_any: [pg_sleep, pg_read_file, pg_read_binary_file, pg_ls_dir, dblink, dblink_exec, lo_import, lo_export]
     action: BLOCK
     sqlstate: "42501"
-    message: "QueryGuard R8: function {function} is not allowed through the proxy."
+    message: "QueryGuard R8: {function}() isn't allowed through the proxy."
+
+  - id: R6
+    name: block-cross-joins
+    priority: 28
+    when:
+      statement: [SELECT, UPDATE, DELETE]
+      has_cross_join: true
+    action: BLOCK
+    sqlstate: "42601"
+    message: "QueryGuard R6: cross join or a join with no condition. Add an ON clause."
 
   - id: R3
     name: block-expensive-analyst-queries
@@ -59,31 +81,21 @@ rules:
       statement: [SELECT]
       select_star: true
       estimated_rows_gt: 1000000
-      roles_except: [etl]
+      roles_except: [etl, admin]
     action: BLOCK
     sqlstate: "54000"
     message: "QueryGuard R5: SELECT * over ~{rows} rows. Name the columns you need."
-
-  - id: R6
-    name: block-cross-joins
-    priority: 50
-    when:
-      statement: [SELECT, UPDATE, DELETE]
-      has_cross_join: true
-    action: BLOCK
-    sqlstate: "42601"
-    message: "QueryGuard R6: cross join or missing join condition."
 
   - id: R7
     name: block-writes-outside-maintenance
     priority: 60
     when:
       roles: [app_readonly]
-      statement: [INSERT, UPDATE, DELETE]
+      statement: [INSERT, UPDATE, DELETE, MERGE]
       outside_window: { days: [SAT, SUN], from: "02:00", to: "04:00", tz: "UTC" }
     action: BLOCK
     sqlstate: "25006"
-    message: "QueryGuard R7: writes are only allowed in the maintenance window."
+    message: "QueryGuard R7: {role} can only write during the weekend maintenance window (Sat/Sun 02:00-04:00 UTC)."
 
   - id: R4
     name: cap-analyst-result-size
@@ -95,4 +107,17 @@ rules:
     action: REWRITE
     rewrite:
       add_limit: 1000
-    message: "QueryGuard R4: added LIMIT 1000."
+
+masking:
+  - table: customers
+    column: email
+    strategy: partial_email
+    roles: [analyst]
+  - table: customers
+    column: phone
+    strategy: last4
+    roles: [analyst]
+  - table: customers
+    column: card_last4
+    strategy: redact
+    except_roles: [admin]

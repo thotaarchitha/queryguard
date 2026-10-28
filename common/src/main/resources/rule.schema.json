@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/thotaarchitha/queryguard/rule.schema.json",
+  "title": "QueryGuard rule",
+  "type": "object",
+  "required": ["id", "action"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,31}$" },
+    "name": { "type": "string", "maxLength": 100 },
+    "priority": { "type": "integer", "minimum": 0, "maximum": 10000 },
+    "enabled": { "type": "boolean" },
+    "action": { "enum": ["BLOCK", "REWRITE", "block", "rewrite"] },
+    "sqlstate": { "type": "string", "pattern": "^[0-9A-Z]{5}$" },
+    "message": { "type": "string", "maxLength": 500 },
+    "rewrite": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "add_limit": { "type": "integer", "minimum": 1, "maximum": 1000000 }
+      }
+    },
+    "when": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "roles": { "$ref": "#/$defs/names" },
+        "roles_except": { "$ref": "#/$defs/names" },
+        "users": { "$ref": "#/$defs/names" },
+        "statement": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "enum": ["SELECT", "INSERT", "UPDATE", "DELETE", "MERGE", "CREATE", "ALTER", "DROP", "TRUNCATE",
+                     "GRANT", "REVOKE", "COPY", "CALL", "DO", "EXPLAIN", "TRANSACTION", "SESSION", "OTHER",
+                     "DDL", "WRITE", "ANY"]
+          }
+        },
+        "has_where": { "type": "boolean" },
+        "has_limit": { "type": "boolean" },
+        "select_star": { "type": "boolean" },
+        "has_cross_join": { "type": "boolean" },
+        "tables_any": { "$ref": "#/$defs/names" },
+        "functions_any": { "$ref": "#/$defs/names" },
+        "estimated_cost_gt": { "type": "number", "minimum": 0 },
+        "estimated_rows_gt": { "type": "number", "minimum": 0 },
+        "outside_window": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "days": { "type": "array", "items": { "enum": ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"] } },
+            "from": { "type": "string", "pattern": "^[0-2][0-9]:[0-5][0-9]$" },
+            "to": { "type": "string", "pattern": "^[0-2][0-9]:[0-5][0-9]$" },
+            "tz": { "type": "string" }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "names": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1, "maxLength": 63 } }
+  }
+}

@@ -3,6 +3,22 @@ netty = "4.1.114.Final"
 slf4j = "2.0.16"
 junit = "5.11.3"
 assertj = "3.26.3"
+mockito = "5.14.2"
+jsqlparser = "4.9"
+jackson = "2.17.2"
+caffeine = "3.1.8"
+hikari = "5.1.0"
+postgresql = "42.7.4"
+resilience4j = "2.2.0"
+micrometer = "1.13.6"
+kafka = "3.7.1"
+jsonschema = "1.5.2"
+testcontainers = "1.20.3"
+springboot = "3.3.5"
+springdm = "1.1.6"
+springdoc = "2.6.0"
+jmh = "1.37"
+jmhplugin = "0.7.2"
 
 [libraries]
 netty-all = { module = "io.netty:netty-all", version.ref = "netty" }
@@ -12,3 +28,26 @@ junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
 junit-launcher = { module = "org.junit.platform:junit-platform-launcher" }
 assertj = { module = "org.assertj:assertj-core", version.ref = "assertj" }
+mockito = { module = "org.mockito:mockito-core", version.ref = "mockito" }
+mockito-junit = { module = "org.mockito:mockito-junit-jupiter", version.ref = "mockito" }
+jsqlparser = { module = "com.github.jsqlparser:jsqlparser", version.ref = "jsqlparser" }
+jackson-bom = { module = "com.fasterxml.jackson:jackson-bom", version.ref = "jackson" }
+jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind" }
+jackson-yaml = { module = "com.fasterxml.jackson.dataformat:jackson-dataformat-yaml" }
+caffeine = { module = "com.github.ben-manes.caffeine:caffeine", version.ref = "caffeine" }
+hikari = { module = "com.zaxxer:HikariCP", version.ref = "hikari" }
+postgresql = { module = "org.postgresql:postgresql", version.ref = "postgresql" }
+resilience4j-circuitbreaker = { module = "io.github.resilience4j:resilience4j-circuitbreaker", version.ref = "resilience4j" }
+micrometer-prometheus = { module = "io.micrometer:micrometer-registry-prometheus", version.ref = "micrometer" }
+kafka-clients = { module = "org.apache.kafka:kafka-clients", version.ref = "kafka" }
+json-schema-validator = { module = "com.networknt:json-schema-validator", version.ref = "jsonschema" }
+testcontainers-bom = { module = "org.testcontainers:testcontainers-bom", version.ref = "testcontainers" }
+testcontainers-postgresql = { module = "org.testcontainers:postgresql" }
+testcontainers-kafka = { module = "org.testcontainers:kafka" }
+testcontainers-junit = { module = "org.testcontainers:junit-jupiter" }
+springdoc = { module = "org.springdoc:springdoc-openapi-starter-webmvc-ui", version.ref = "springdoc" }
+
+[plugins]
+spring-boot = { id = "org.springframework.boot", version.ref = "springboot" }
+spring-dm = { id = "io.spring.dependency-management", version.ref = "springdm" }
+jmh = { id = "me.champeau.jmh", version.ref = "jmhplugin" }
