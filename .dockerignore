@@ -3,3 +3,6 @@
 .git
 .idea
 bench/**/results
+analytics/dbt/target
+analytics/dbt/logs
+**/__pycache__

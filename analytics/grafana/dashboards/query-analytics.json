@@ -1,0 +1,550 @@
+{
+  "uid": "qg-analytics",
+  "title": "QueryGuard / what happened to every query",
+  "tags": [
+    "queryguard",
+    "clickhouse"
+  ],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "graphTooltip": 1,
+  "refresh": "10s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Every query, by what QueryGuard did with it",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 17,
+        "h": 11
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "rawSql": "SELECT $__timeInterval(ts) AS time, decision, count() AS queries\n        FROM qg.query_events\n        WHERE $__timeFilter(ts)\n        GROUP BY time, decision\n        ORDER BY time",
+          "format": 0,
+          "queryType": "timeseries",
+          "refId": "A"
+        }
+      ],
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 85,
+            "lineWidth": 0,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "barAlignment": 0
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ALLOW"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#4E8C82"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "REWRITE"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#E0A526"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "BLOCK"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#E0492B"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "description": "One bar per interval, stacked. ALLOW is most of it; watch the red."
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Blocked",
+      "gridPos": {
+        "x": 17,
+        "y": 0,
+        "w": 7,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "rawSql": "SELECT countIf(decision = 'BLOCK') AS blocked FROM qg.query_events WHERE $__timeFilter(ts)",
+          "format": 1,
+          "queryType": "table",
+          "refId": "A"
+        }
+      ],
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#E0492B"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "textMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Block rate",
+      "gridPos": {
+        "x": 17,
+        "y": 4,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "rawSql": "SELECT countIf(decision = 'BLOCK') / greatest(count(), 1) AS rate FROM qg.query_events WHERE $__timeFilter(ts)",
+          "format": 1,
+          "queryType": "table",
+          "refId": "A"
+        }
+      ],
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#E8E4DA"
+          },
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "textMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Rewritten",
+      "gridPos": {
+        "x": 21,
+        "y": 4,
+        "w": 3,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "rawSql": "SELECT countIf(decision = 'REWRITE') FROM qg.query_events WHERE $__timeFilter(ts)",
+          "format": 1,
+          "queryType": "table",
+          "refId": "A"
+        }
+      ],
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#E0A526"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "textMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Events in ClickHouse (all time)",
+      "gridPos": {
+        "x": 17,
+        "y": 8,
+        "w": 7,
+        "h": 3
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "rawSql": "SELECT count() FROM qg.query_events",
+          "format": 1,
+          "queryType": "table",
+          "refId": "A"
+        }
+      ],
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#8A877F"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "textMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "barchart",
+      "title": "Which rules fired",
+      "gridPos": {
+        "x": 0,
+        "y": 11,
+        "w": 8,
+        "h": 11
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "rawSql": "SELECT ifNull(rule_id, '?') AS rule, count() AS fired\n        FROM qg.query_events\n        WHERE $__timeFilter(ts) AND decision != 'ALLOW'\n        GROUP BY rule ORDER BY fired DESC",
+          "format": 1,
+          "queryType": "table",
+          "refId": "A"
+        }
+      ],
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#E0492B"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "always",
+        "legend": {
+          "showLegend": false
+        },
+        "xTickLabelRotation": 0,
+        "barWidth": 0.7
+      },
+      "description": "R = rule from the policy, M1 = masking guard, QG-* = fail-safe decisions (parse/cost/timeout)."
+    },
+    {
+      "id": 7,
+      "type": "table",
+      "title": "Most expensive query shapes, last 7 days",
+      "gridPos": {
+        "x": 8,
+        "y": 11,
+        "w": 16,
+        "h": 11
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "rawSql": "SELECT any(sql_normalized)                              AS query,\n               any(statement_type)                              AS kind,\n               countMerge(executions)                           AS runs,\n               countIfMerge(blocked)                            AS blocked,\n               round(max(cost_max))                             AS max_cost,\n               round(avgMerge(query_ms_avg), 1)                 AS avg_ms,\n               arrayStringConcat(groupUniqArrayMerge(roles), ' ') AS roles\n        FROM qg.top_fingerprints_daily\n        WHERE day >= today() - 7\n        GROUP BY fingerprint\n        ORDER BY max_cost DESC\n        LIMIT 15",
+          "format": 1,
+          "queryType": "table",
+          "refId": "A"
+        }
+      ],
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "query"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 520
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "blocked"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#E0492B"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      },
+      "description": "From the top_fingerprints_daily rollup. Literals are already stripped; the proxy never logs values."
+    },
+    {
+      "id": 8,
+      "type": "table",
+      "title": "Who gets blocked",
+      "gridPos": {
+        "x": 0,
+        "y": 22,
+        "w": 11,
+        "h": 9
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "rawSql": "SELECT user, role,\n               countIf(decision = 'BLOCK')                AS blocked,\n               count()                                    AS total,\n               round(100 * blocked / total, 2)            AS pct,\n               topKIf(1)(rule_id, decision = 'BLOCK')[1]  AS usual_rule\n        FROM qg.query_events\n        WHERE $__timeFilter(ts)\n        GROUP BY user, role\n        ORDER BY blocked DESC",
+          "format": 1,
+          "queryType": "table",
+          "refId": "A"
+        }
+      ],
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      }
+    },
+    {
+      "id": 9,
+      "type": "barchart",
+      "title": "Masked values served, by role and column",
+      "gridPos": {
+        "x": 11,
+        "y": 22,
+        "w": 7,
+        "h": 9
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "rawSql": "SELECT concat(toString(role), ' / ', toString(col)) AS who, count() AS reads\n        FROM qg.query_events\n        ARRAY JOIN masked_columns AS col\n        WHERE $__timeFilter(ts)\n        GROUP BY who ORDER BY reads DESC",
+          "format": 1,
+          "queryType": "table",
+          "refId": "A"
+        }
+      ],
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#E0A526"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "always",
+        "legend": {
+          "showLegend": false
+        }
+      }
+    },
+    {
+      "id": 10,
+      "type": "text",
+      "title": "How to read this",
+      "gridPos": {
+        "x": 18,
+        "y": 22,
+        "w": 6,
+        "h": 9
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "**Bars** are every query that went through the proxy.\n\n**M1** means someone tried to use a masked column in a way that would leak it\n(`upper(email)`, `WHERE email LIKE ...`). Masking itself is in the right panel.\n\n**QG-COST / QG-TIMEOUT** are the proxy deciding without full information.\nIf those climb, EXPLAIN is slow or Postgres is struggling.\n\nRaw events live 90 days in `qg.query_events`. The two rollups keep 400."
+      },
+      "transparent": true
+    }
+  ],
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  }
+}

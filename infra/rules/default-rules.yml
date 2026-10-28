@@ -18,8 +18,9 @@ role_mapping:
 settings:
   # A statement JSqlParser can't read: reads go through, anything else is refused.
   on_parse_error: allow_reads
-  # EXPLAIN failed or timed out: let it through and count it (see design-decisions.md).
-  on_cost_error: allow
+  # EXPLAIN failed or timed out: estimate from table statistics instead (full-scan upper bound).
+  # "allow" here turned an overloaded database into a worse one; see docs/bug-journal.md.
+  on_cost_error: estimate
   explain_timeout_ms: 200
   decision_timeout_ms: 1000
 

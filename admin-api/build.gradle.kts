@@ -18,6 +18,7 @@ dependencies {
     implementation("org.flywaydb:flyway-database-postgresql")
     implementation(libs.springdoc)
     runtimeOnly(libs.postgresql)
+    runtimeOnly("io.micrometer:micrometer-registry-prometheus")
     testImplementation(libs.postgresql)
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
