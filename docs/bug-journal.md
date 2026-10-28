@@ -31,3 +31,93 @@ socket. `pg_isready` with no `-h` checks that socket, so it says "ready" during 
 **Fix.** `pg_isready -h 127.0.0.1`. TCP isn't open until the real server starts after init.
 
 **Lesson.** A healthcheck should test the same path the clients use, not just "is the process up."
+
+---
+
+### 2026-10-28: `ORDER BY email` leaked a masked column
+
+**Symptom.** The masking guard test `SELECT id FROM customers ORDER BY email` (as an analyst) passed
+straight through. Sorting by a column you can't see tells you its order, and with a LIMIT and a few
+queries you can recover values.
+
+**Cause.** I find column references by riding on JSqlParser's `TablesNamesFinder`, which walks
+every expression... except ORDER BY and GROUP BY, because there are never tables in there.
+
+**Fix.** The inspector walks ORDER BY and GROUP BY itself after the normal traversal.
+
+**Lesson.** When you borrow someone else's tree walker, you inherit their idea of what matters.
+The test list of "ways to leak a masked column" is now the most valuable test file in the repo.
+
+---
+
+### 2026-10-28: cold start unmasked `upper(email)`
+
+**Symptom.** In the integration tests, the very first query of a run, `SELECT upper(email) FROM customers`
+as an analyst, returned `USER1@EXAMPLE.COM`. Every later run of the same test passed.
+
+**Cause.** Two fail-open paths lining up. The first query on a cold proxy had to open the metadata
+connection pool and warm up JSqlParser, which took longer than the 1 s decision budget. A timed-out
+decision for a read was allowed through (the parse-error policy is `allow_reads`), and since masking
+metadata hadn't loaded yet either, the result went out unmasked.
+
+**Fix.** Three changes:
+1. A timed-out decision for a role that has masked columns is always blocked. Masking never fails open.
+2. Loading masking metadata gets its own budget (5 s) and happens *before* the 1 s decision clock starts.
+   It's also prefetched when a session starts.
+3. The analyzer is warmed up at startup with a few hundred parses (about 2 s on a cold JVM).
+
+**Lesson.** "Fail-open for reads" sounded reasonable for cost rules and is plainly wrong for privacy.
+Each guard needs its own failure policy.
+
+---
+
+### 2026-10-28: the cost rules stopped working exactly when they mattered
+
+**Symptom.** With the traffic generator running at a few hundred queries per second, Postgres was at
+500% CPU, and `pg_stat_activity` showed `SELECT * FROM orders` (5M rows) running for three minutes, plus
+several analyst full-table joins. R3 and R5 exist to block exactly those.
+
+**Cause.** Under load, EXPLAIN blew its 200 ms `statement_timeout`. The policy said `on_cost_error: allow`,
+so every expensive query got through. They made the database slower, so more EXPLAINs timed out. A
+positive feedback loop: the overloaded database made the guard weaker, and the weaker guard
+overloaded the database further.
+
+**Fix.** A third mode, `on_cost_error: estimate`, now the default. When EXPLAIN fails, the proxy uses
+`pg_class.reltuples/relpages` (cached for 5 minutes) to compute what a full scan of every table in the
+query would cost. That's an upper bound: it ignores WHERE clauses, so it overestimates selective
+queries. That's the right direction to be wrong in during an outage. After a timeout the proxy also stops
+sending EXPLAINs for 2 s and goes straight to the estimate, so it isn't piling planning work onto a
+struggling server. The error message says when it's an estimate.
+
+**Lesson.** Fail-open is only safe if what it lets through can't make the failure worse.
+This is the one I'd tell in an interview.
+
+---
+
+### 2026-10-28: the proxy was parsing every query from scratch
+
+**Symptom.** Same load test: proxy at 3+ cores for ~260 queries/s, decision p50 68 ms, p99 777 ms.
+
+**Cause.** JSqlParser ran on every query. Most traffic is the same few dozen query shapes with different
+literals, so nearly all of that work was repeated.
+
+**Fix.** Everything the rules look at (statement type, tables, WHERE/LIMIT, columns, functions) depends
+only on the normalized shape, so it's cached by normalized text (Caffeine, 20K shapes). The AST is
+only parsed again, from the query's own text, when a REWRITE actually needs it. The JMH numbers in
+`bench/RESULTS.md` show the difference.
+
+---
+
+### 2026-10-28: smaller ones
+
+- **Testcontainers vs Docker Engine 29.** Every container test failed with an empty `Status 400`.
+  Docker 29 dropped the old API version that Testcontainers 1.20's client asks for. 1.21.4 works. The
+  admin API was still failing afterwards because Spring Boot's dependency management quietly pinned
+  Testcontainers back to its own older version, so that needed `extra["testcontainers.version"]`.
+- **`integrationTest` ran zero tests and reported success.** I'd put `excludeTags("integration")` on
+  `withType<Test>`, which includes the integration task itself. I only caught it because the
+  result XML was missing. A green build with no tests is the worst kind.
+- **Parallel `docker compose build` broke Gradle.** Both images used the same BuildKit cache mount
+  for `~/.gradle` and fought over its lock files. `sharing=locked` makes them take turns.
+- **ClickHouse "unhealthy" while working fine.** The healthcheck ran an anonymous query, and with a
+  password set that's refused. `/ping` needs no auth.
