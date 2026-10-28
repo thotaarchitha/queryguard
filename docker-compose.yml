@@ -1,0 +1,38 @@
+name: queryguard
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: dev # local demo only
+      POSTGRES_DB: shop
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./infra/seed/seed.sql:/docker-entrypoint-initdb.d/01-seed.sql:ro
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # TCP on purpose: during the seed, postgres only listens on its unix
+      # socket, so a socket check would report ready too early.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d shop"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 180s
+
+  proxy:
+    build:
+      context: .
+      dockerfile: proxy/Dockerfile
+    environment:
+      QG_LISTEN_PORT: "6432"
+      QG_PG_HOST: postgres
+      QG_PG_PORT: "5432"
+    ports:
+      - "6432:6432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
