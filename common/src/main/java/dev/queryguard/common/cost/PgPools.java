@@ -42,7 +42,7 @@ public final class PgPools implements AutoCloseable {
         c.setPoolName("qg-" + database);
         c.setMaximumPoolSize(4);
         c.setMinimumIdle(0);
-        c.setConnectionTimeout(1000);
+        c.setConnectionTimeout(3000);
         c.setInitializationFailTimeout(-1);
         c.setReadOnly(true);
         c.setConnectionInitSql("SET statement_timeout = " + statementTimeoutMs);

@@ -30,15 +30,16 @@ subprojects {
     }
 
     tasks.withType<Test>().configureEach {
-        useJUnitPlatform {
-            // Integration tests need Docker; CI and `./gradlew integrationTest` run them.
-            excludeTags("integration")
-        }
         testLogging {
             events("failed", "skipped")
             exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
         }
         finalizedBy("jacocoTestReport")
+    }
+
+    tasks.named<Test>("test") {
+        // Integration tests need Docker; CI and `./gradlew integrationTest` run them.
+        useJUnitPlatform { excludeTags("integration") }
     }
 
     tasks.register<Test>("integrationTest") {

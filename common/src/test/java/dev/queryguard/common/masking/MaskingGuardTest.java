@@ -47,6 +47,10 @@ class MaskingGuardTest {
             "SELECT c FROM customers c",
             "SELECT email FROM customers UNION SELECT 'x'",
             "SELECT count(DISTINCT email) FROM customers",
+            "SELECT upper(email) FROM customers LIMIT 1",
+            "SELECT id FROM customers WHERE email LIKE 'user1%' LIMIT 1",
+            "SELECT row_to_json(c) FROM customers c LIMIT 1",
+            "SELECT email FROM customers UNION SELECT 'x' LIMIT 1",
     })
     void shapesThatHideWhereTheValueCameFromAreBlocked(String sql) {
         assertThat(check("analyst", sql)).isPresent().get()
