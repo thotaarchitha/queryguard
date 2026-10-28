@@ -100,6 +100,14 @@ class RuleEngineTest {
     }
 
     @Test
+    void rewriteOfACachedShapeUsesThisQuerysOwnLiterals() {
+        // second query hits the shape cache; its rewrite must come from its own text
+        eval("alice", "SELECT id FROM orders WHERE customer_id = 11");
+        Decision d = eval("alice", "SELECT id FROM orders WHERE customer_id = 22");
+        assertThat(d.rewrittenSql()).contains("22").doesNotContain("11").containsIgnoringCase("LIMIT 1000");
+    }
+
+    @Test
     void r4LeavesLockingSelectsAlone() {
         assertThat(eval("alice", "SELECT id FROM orders WHERE id = 1 FOR UPDATE").verdict()).isEqualTo(Verdict.ALLOW);
     }
@@ -139,7 +147,7 @@ class RuleEngineTest {
     }
 
     @Test
-    void costFailureFailsOpenByDefault() throws Exception {
+    void costFailureWithNoFallbackDoesNotBlock() throws Exception {
         CostLookup broken = mock(CostLookup.class);
         when(broken.estimate(any())).thenThrow(new CostUnavailableException("EXPLAIN timed out"));
         assertThat(eval("alice", "SELECT status FROM orders GROUP BY status LIMIT 3", broken, TUESDAY_NOON).verdict())

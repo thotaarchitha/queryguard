@@ -34,7 +34,7 @@ import net.sf.jsqlparser.statement.update.Update;
 import net.sf.jsqlparser.util.TablesNamesFinder;
 
 /**
- * Turns SQL text into {@link QueryInfo}. Thread-safe; holds no state.
+ * Turns SQL text into {@link QueryInfo}. Thread-safe (the shape cache is a concurrent Caffeine cache).
  *
  * <p>Each statement is lexed first and parsed second. Parsing per statement (instead of
  * handing JSqlParser the whole multi-statement string) means one weird statement doesn't
@@ -47,6 +47,19 @@ public final class QueryAnalyzer {
             "where", "group", "order", "limit", "offset", "having", "window", "union", "intersect",
             "except", "on", "using", "join", "inner", "left", "right", "full", "cross", "natural",
             "set", "returning", "values", "fetch", "for", "as", "lateral", "only");
+
+    private final com.github.benmanes.caffeine.cache.Cache<String, AstFacts> shapes;
+
+    /** Caches parse results for up to 20k query shapes. */
+    public QueryAnalyzer() {
+        this(20_000);
+    }
+
+    /** {@code shapeCacheSize} 0 turns the cache off (benchmarks use that to measure raw parsing). */
+    public QueryAnalyzer(int shapeCacheSize) {
+        this.shapes = shapeCacheSize <= 0 ? null
+                : com.github.benmanes.caffeine.cache.Caffeine.newBuilder().maximumSize(shapeCacheSize).build();
+    }
 
     public QueryInfo analyze(String sql) {
         List<Token> tokens = SqlLexer.tokenize(sql);
@@ -66,8 +79,21 @@ public final class QueryAnalyzer {
         }
 
         StatementInfo info = new StatementInfo(slice, part);
-        info.fingerprint = Fingerprints.of(SqlLexer.normalize(part));
+        String normalized = SqlLexer.normalize(part);
+        info.fingerprint = Fingerprints.of(normalized);
         fillFromTokens(info, part);
+
+        // Everything the rules look at is the same for every query of the same shape, so
+        // JSqlParser runs once per shape, not once per query. The AST itself is only needed
+        // to rewrite, and then it's parsed from this query's own text, on demand.
+        AstFacts cached = shapes == null ? null : shapes.getIfPresent(normalized);
+        if (cached != null) {
+            cached.applyTo(info);
+            if (info.parsed) {
+                info.astLoader = () -> CCJSqlParserUtil.parse(forParser(slice, part));
+            }
+            return info;
+        }
         try {
             Statement st = CCJSqlParserUtil.parse(forParser(slice, part));
             fillFromAst(info, st);
@@ -79,7 +105,38 @@ public final class QueryAnalyzer {
             // what an unparsed statement is allowed to do.
             info.parsed = false;
         }
+        if (shapes != null) {
+            shapes.put(normalized, AstFacts.of(info));
+        }
         return info;
+    }
+
+    /** The literal-independent part of a parse, shared by every query with the same normalized text. */
+    private record AstFacts(boolean parsed, StatementKind kind, Set<String> tables, Set<String> functions,
+                            Map<String, String> aliases, List<StatementInfo.ColumnUse> columns, boolean hasWhere,
+                            boolean hasLimit, boolean selectStar, boolean hasCrossJoin, boolean setOperation) {
+
+        static AstFacts of(StatementInfo i) {
+            return new AstFacts(i.parsed, i.kind, Set.copyOf(i.tables), Set.copyOf(i.functions), Map.copyOf(i.aliases),
+                    List.copyOf(i.columns), i.hasWhere, i.hasLimit, i.selectStar, i.hasCrossJoin, i.setOperation);
+        }
+
+        void applyTo(StatementInfo i) {
+            i.parsed = parsed;
+            if (!parsed) {
+                return; // lexer facts already filled in; nothing better to add
+            }
+            i.kind = kind;
+            i.tables = new java.util.LinkedHashSet<>(tables);
+            i.functions = new java.util.LinkedHashSet<>(functions);
+            i.aliases = new HashMap<>(aliases);
+            i.columns = new ArrayList<>(columns);
+            i.hasWhere = hasWhere;
+            i.hasLimit = hasLimit;
+            i.selectStar = selectStar;
+            i.hasCrossJoin = hasCrossJoin;
+            i.setOperation = setOperation;
+        }
     }
 
     /**

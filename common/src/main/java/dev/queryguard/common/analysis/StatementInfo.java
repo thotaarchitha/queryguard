@@ -36,6 +36,8 @@ public final class StatementInfo {
     List<ColumnUse> columns = new ArrayList<>();
     Map<String, String> aliases = new HashMap<>();
     Statement ast;
+    /** Set when the facts came from the shape cache: parse this query's own text only if someone needs the AST. */
+    java.util.concurrent.Callable<Statement> astLoader;
     boolean rewritten;
 
     StatementInfo(String sql, List<SqlLexer.Token> tokens) {
@@ -110,6 +112,15 @@ public final class StatementInfo {
     }
 
     public Statement ast() {
+        if (ast == null && astLoader != null) {
+            try {
+                ast = astLoader.call();
+            } catch (Exception e) {
+                // Same shape parsed fine before, so this is unexpected. No AST means no rewrite,
+                // which is the safe direction.
+                astLoader = null;
+            }
+        }
         return ast;
     }
 

@@ -85,7 +85,11 @@ public final class RuleEngine {
                 }
                 if (rule.action() == Rule.Action.BLOCK) {
                     CostEstimate c = facts.cost;
-                    return Decision.block(rule.id(), rule.effectiveSqlstate(), render(rule, facts, ctx),
+                    String message = render(rule, facts, ctx);
+                    if (c != null && c.fromTableStats()) {
+                        message += " (EXPLAIN was unavailable, so this is a full-scan estimate from table statistics.)";
+                    }
+                    return Decision.block(rule.id(), rule.effectiveSqlstate(), message,
                             c == null ? null : c.totalCost(), c == null ? null : c.planRows());
                 }
                 if (rule.action() == Rule.Action.REWRITE && applyRewrite(rule, st)) {

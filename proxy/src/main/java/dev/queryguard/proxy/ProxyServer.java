@@ -76,7 +76,8 @@ public final class ProxyServer {
             log.warn("QG_EXPLAIN_USER not set: cost rules can't fire and masking can't resolve columns");
         }
         MaskTargets maskTargets = new MaskTargets(pools);
-        decider = new Decider(policies, pools == null ? null : new ExplainCostEstimator(pools), maskTargets, metrics);
+        decider = new Decider(policies, pools == null ? null : new ExplainCostEstimator(pools),
+                pools == null ? null : new dev.queryguard.common.cost.TableStats(pools), maskTargets, metrics);
         events = config.kafkaBootstrap() == null || config.kafkaBootstrap().isBlank()
                 ? EventPublisher.NOOP
                 : new KafkaEventPublisher(config.kafkaBootstrap(), config.kafkaTopic(), 50_000, metrics.registry());

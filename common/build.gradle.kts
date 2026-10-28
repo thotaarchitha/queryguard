@@ -10,6 +10,7 @@ dependencies {
     api(libs.jackson.databind)
     api(libs.jackson.yaml)
     api(libs.hikari)
+    implementation(libs.caffeine)
     implementation(libs.postgresql)
     implementation(libs.json.schema.validator)
     implementation(libs.slf4j.api)

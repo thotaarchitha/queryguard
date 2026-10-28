@@ -45,6 +45,7 @@ public class DryRunController {
     private final QueryAnalyzer analyzer = new QueryAnalyzer();
     private final PgPools pools;
     private final ExplainCostEstimator estimator;
+    private final dev.queryguard.common.cost.TableStats tableStats;
     private final String database;
 
     public DryRunController(PolicyStore store, SeedPolicy seed, AdminProperties props) {
@@ -55,6 +56,7 @@ public class DryRunController {
         this.pools = new PgPools(shop.host(), shop.port(), shop.explainUser(), shop.explainPassword(),
                 seed.config().settings().explainTimeoutMs());
         this.estimator = new ExplainCostEstimator(pools);
+        this.tableStats = new dev.queryguard.common.cost.TableStats(pools);
     }
 
     @Operation(summary = "Dry run a query", description = "Returns the decision and the reason. Nothing is executed.")
@@ -63,8 +65,16 @@ public class DryRunController {
         QueryGuardConfig config = store.current(seed.config());
         String role = config.roleFor(req.user());
         QueryInfo q = analyzer.analyze(req.sql());
-        Decision d = new RuleEngine(config).evaluate(q, new EvalContext(req.user(), role, Instant.now(),
-                st -> estimator.estimate(database, st.sql())));
+        Decision d = new RuleEngine(config).evaluate(q, new EvalContext(req.user(), role, Instant.now(), st -> {
+            try {
+                return estimator.estimate(database, st.sql());
+            } catch (dev.queryguard.common.cost.CostUnavailableException e) {
+                if (config.settings().onCostError() != dev.queryguard.common.config.Settings.FailMode.ESTIMATE) {
+                    throw e;
+                }
+                return tableStats.upperBound(database, st);
+            }
+        }));
         List<StatementSummary> statements = q.statements().stream()
                 .map(s -> new StatementSummary(s.kind().name(), s.parsed(), List.copyOf(s.tables())))
                 .toList();

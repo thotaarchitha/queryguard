@@ -49,13 +49,16 @@ public final class Decider implements AutoCloseable {
     private final QueryAnalyzer analyzer = new QueryAnalyzer();
     private final PolicyHolder policies;
     private final ExplainCostEstimator estimator;
+    private final dev.queryguard.common.cost.TableStats tableStats;
     private final MaskTargets maskTargets;
     private final ProxyMetrics metrics;
     private final Cache<String, CostEstimate> costCache;
 
-    public Decider(PolicyHolder policies, ExplainCostEstimator estimator, MaskTargets maskTargets, ProxyMetrics metrics) {
+    public Decider(PolicyHolder policies, ExplainCostEstimator estimator, dev.queryguard.common.cost.TableStats tableStats,
+                   MaskTargets maskTargets, ProxyMetrics metrics) {
         this.policies = policies;
         this.estimator = estimator;
+        this.tableStats = tableStats;
         this.maskTargets = maskTargets;
         this.metrics = metrics;
         // Keyed by statement fingerprint: WHERE id = 5 and WHERE id = 9 share one EXPLAIN.
@@ -146,22 +149,40 @@ public final class Decider implements AutoCloseable {
         if (policy.config().masking().stream().anyMatch(r -> r.appliesTo(role)) && !loadMasking(database, policy)) {
             return maskingUnavailable(sql, role, start);
         }
-        CostLookup costs = estimator == null ? CostLookup.NONE : st -> cost(database, st);
+        FailMode onCostError = policy.config().settings().onCostError();
+        CostLookup costs = estimator == null ? CostLookup.NONE : st -> cost(database, st, onCostError);
         Decision d = policy.engine().evaluate(query, new EvalContext(user, role, Instant.now(), costs));
         return new Verdict(query, d, System.nanoTime() - start);
     }
 
-    private CostEstimate cost(String database, StatementInfo st) throws CostUnavailableException {
+    private CostEstimate cost(String database, StatementInfo st, FailMode onCostError) throws CostUnavailableException {
         String key = database + ":" + st.fingerprint();
         CostEstimate cached = costCache.getIfPresent(key);
         if (cached != null) {
             return cached;
         }
-        // Failures aren't cached: a timeout under load shouldn't stick for five minutes.
-        CostEstimate fresh = estimator.estimate(database, st.sql());
-        costCache.put(key, fresh);
-        return fresh;
+        boolean estimate = onCostError == FailMode.ESTIMATE && tableStats != null;
+        // EXPLAIN just timed out: don't pile more planning onto a database that's already
+        // struggling. Go straight to the statistics estimate for a couple of seconds.
+        if (estimate && System.nanoTime() < explainBackoffUntil) {
+            return tableStats.upperBound(database, st);
+        }
+        try {
+            CostEstimate fresh = estimator.estimate(database, st.sql());
+            costCache.put(key, fresh);
+            return fresh;
+        } catch (CostUnavailableException e) {
+            explainBackoffUntil = System.nanoTime() + EXPLAIN_BACKOFF_NANOS;
+            if (!estimate) {
+                throw e;
+            }
+            // Not cached: a fallback estimate shouldn't outlive the outage that caused it.
+            return tableStats.upperBound(database, st);
+        }
     }
+
+    private static final long EXPLAIN_BACKOFF_NANOS = TimeUnit.SECONDS.toNanos(2);
+    private volatile long explainBackoffUntil;
 
     /** The whole decision blew its time budget or threw. What happens next is the fail-open/closed setting. */
     private Verdict onFailure(Throwable err, String sql, String role, ActivePolicy policy, long start) {
@@ -193,6 +214,9 @@ public final class Decider implements AutoCloseable {
      * session's first query doesn't pay for it (and doesn't risk the decision timeout).
      */
     public void prefetch(String database, String role) {
+        if (tableStats != null) {
+            executor.execute(() -> tableStats.prefetch(database));
+        }
         ActivePolicy policy = policies.current();
         if (policy.config().masking().stream().noneMatch(r -> r.appliesTo(role))) {
             return;

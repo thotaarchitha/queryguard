@@ -112,6 +112,27 @@ class QueryAnalyzerTest {
     }
 
     @Test
+    void shapeCacheGivesTheSameFactsAsAFreshParse() {
+        QueryAnalyzer uncached = new QueryAnalyzer(0);
+        String[] queries = {
+                "SELECT c.email, upper(c.phone) FROM customers c WHERE c.id = 5 ORDER BY c.country",
+                "SELECT c.email, upper(c.phone) FROM customers c WHERE c.id = 9 ORDER BY c.country",
+                "UPDATE orders SET status = 'x' WHERE id = 3",
+                "UPDATE orders SET status = 'y' WHERE id = 4",
+        };
+        for (String q : queries) {
+            StatementInfo a = analyzer.analyze(q).statements().get(0);
+            StatementInfo b = uncached.analyze(q).statements().get(0);
+            assertThat(a.kind()).isEqualTo(b.kind());
+            assertThat(a.tables()).isEqualTo(b.tables());
+            assertThat(a.columns()).isEqualTo(b.columns());
+            assertThat(a.functions()).isEqualTo(b.functions());
+            assertThat(a.hasWhere()).isEqualTo(b.hasWhere());
+            assertThat(a.ast().toString()).isEqualTo(b.ast().toString()); // lazily parsed from its own text
+        }
+    }
+
+    @Test
     void emptyQueryHasNoStatements() {
         assertThat(analyzer.analyze("  ;  -- nothing\n").statements()).isEmpty();
     }
