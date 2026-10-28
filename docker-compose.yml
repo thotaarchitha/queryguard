@@ -106,6 +106,7 @@ services:
       QG_ADMIN_PORT: "8081"
       QG_KAFKA_BOOTSTRAP: kafka:9092
       QG_INSTANCE: qg-0
+    mem_limit: 1g
     ports:
       - "6432:6432"
       - "8081:8081"
