@@ -1,38 +1,71 @@
 # Design decisions
 
-> Draft notes. Rewrite each section in your own words as you build. Interviewers will ask about these.
+Notes on the calls I made and what I gave up for each. Newest phase at the bottom. If a decision
+gets reversed later, I leave the old reasoning here and add why it changed.
 
-## Phase 1: pass-through proxy
+---
 
-### Sharing the event loop
+## Netty, not thread-per-connection
 
-The outbound PostgreSQL connection is created with `client.eventLoop()` as its group.
-Both halves of a proxied connection are then always handled by the same thread:
+*Phase 1*
 
-- no thread hop when bytes go from one channel to the other,
-- no locks needed for per-connection state,
-- a connection's work stays on one core.
+The obvious version is one thread per client, blocking reads, done in an afternoon. It also pins a
+thread to every idle psql session someone forgot to close, and proxies mostly hold idle connections.
 
-### Backpressure
+With Java 21 virtual threads, thread-per-connection is honestly viable again, and I thought about it.
+I went with Netty anyway for two reasons:
 
-Both channels run with `AUTO_READ` off. A side only reads more when the other side is writable:
+1. Phase 2 needs a real framing layer: messages split across TCP reads, several messages in one read.
+   `ByteToMessageDecoder` is that layer, already tested by a lot of people.
+2. Backpressure is explicit in Netty (`isWritable`, auto-read). With blocking streams it's implicit,
+   and implicit is harder to reason about when a 5M-row result is in flight.
 
-1. After forwarding a batch (`channelReadComplete`), we flush and then call `read()` again,
-   but only if the destination channel is still writable.
-2. If it isn't writable, reading stops. When the destination drains below the low-water mark,
-   `channelWritabilityChanged` fires on that channel's handler and it restarts reads on the source.
+Virtual threads still show up in Phase 3, for the parts that really do block (JDBC to run EXPLAIN).
 
-Without this, a big result set to a slow client would pile up in the proxy's memory.
+## One event loop per connection pair
 
-### Closing
+The backend `Bootstrap` uses `client.eventLoop()` instead of its own group. Both channels of a
+proxied connection then live on one thread:
 
-When either side goes inactive, the other side is flushed and then closed. If PostgreSQL dies
-mid-query the client sees a disconnect right away instead of hanging. The backend connect has a
-3 s timeout (`QG_CONNECT_TIMEOUT_MS`).
+- no thread hop on every forwarded buffer
+- per-connection state needs no synchronization
+- the work stays on one core
 
-## Open questions for later phases
+The cost: one expensive connection can starve the others sharing its loop. That's acceptable only
+because nothing slow is allowed to run *on* the loop. That rule becomes the constraint for every
+later phase.
 
-- Fail-open vs fail-closed when EXPLAIN times out or the parser fails (Phase 3)
-- Column identity by table OID + column number instead of name (Phase 4)
-- LISTEN/NOTIFY for live rule reloads (Phase 5)
-- Async event logging so queries never wait on Kafka (Phase 6)
+## Backpressure
+
+`AUTO_READ` is off on both sides. The loop is:
+
+```
+read batch → write to other side → channelReadComplete: flush
+    other side writable?  yes → read() again
+                          no  → stop; wait for channelWritabilityChanged on the other side
+```
+
+Without this, a slow client reading a large result makes the proxy buffer whatever Postgres sends
+as fast as Postgres sends it. The 8 MB test in `ProxyServerTest` exists to push past Netty's 64 KB
+high-water mark and actually go down this path.
+
+Not done yet: the high- and low-water marks are Netty defaults (32/64 KB). They may want tuning once
+there are DataRows to rewrite.
+
+## Failure behavior so far
+
+- Backend connect timeout: 3 s (`QG_CONNECT_TIMEOUT_MS`). The client gets closed, not left hanging.
+- Either side closes → flush what's queued, close the other side.
+- No retries. Retrying a connect behind a client's back is how you get duplicate writes. The circuit
+  breaker in Phase 4 is the right place for "Postgres is down" logic.
+
+---
+
+## Coming up (decide before writing the code)
+
+- **Fail-open vs fail-closed** when EXPLAIN times out or the parser chokes. My current lean: fail-closed
+  for writes, fail-open for reads, behind a flag. It needs a real argument written here.
+- **Masking by table OID + attnum**, and what to do with expressions (`upper(email)`), where
+  RowDescription reports OID 0.
+- **LISTEN/NOTIFY for rule reload**: what happens to a query that's mid-evaluation during a swap.
+- **Async Kafka producer**: what we lose when Kafka is down, and why that's fine.
