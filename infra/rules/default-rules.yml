@@ -1,0 +1,98 @@
+# Starting rule set. The proxy loads this from Phase 3; from Phase 5 it only
+# seeds the config database and the admin API owns the rules.
+#
+# Evaluation: rules run in priority order (lowest first). The first BLOCK wins;
+# REWRITE rules stack.
+
+role_mapping:
+  postgres: admin
+  alice: analyst
+  bob: app
+  etl_user: etl
+  report_ro: app_readonly
+
+rules:
+  - id: R1
+    name: block-unbounded-writes
+    priority: 10
+    when:
+      statement: [UPDATE, DELETE]
+      has_where: false
+    action: BLOCK
+    sqlstate: "42501"
+    message: "QueryGuard R1: {statement} without a WHERE clause would touch every row."
+
+  - id: R2
+    name: block-destructive-ddl
+    priority: 20
+    when:
+      statement: [DROP, TRUNCATE]
+      roles_except: [admin]
+    action: BLOCK
+    sqlstate: "42501"
+    message: "QueryGuard R2: {statement} is only allowed for admins."
+
+  - id: R8
+    name: block-risky-functions
+    priority: 25
+    when:
+      functions_any: [pg_sleep, pg_read_file, pg_read_binary_file, dblink, lo_import, lo_export]
+    action: BLOCK
+    sqlstate: "42501"
+    message: "QueryGuard R8: function {function} is not allowed through the proxy."
+
+  - id: R3
+    name: block-expensive-analyst-queries
+    priority: 30
+    when:
+      roles: [analyst]
+      statement: [SELECT]
+      estimated_cost_gt: 100000
+    action: BLOCK
+    sqlstate: "54000"
+    message: "QueryGuard R3: estimated cost {cost} is over the 100000 limit for analysts. Add filters or a LIMIT."
+
+  - id: R5
+    name: block-select-star-on-huge-tables
+    priority: 40
+    when:
+      statement: [SELECT]
+      select_star: true
+      estimated_rows_gt: 1000000
+      roles_except: [etl]
+    action: BLOCK
+    sqlstate: "54000"
+    message: "QueryGuard R5: SELECT * over ~{rows} rows. Name the columns you need."
+
+  - id: R6
+    name: block-cross-joins
+    priority: 50
+    when:
+      statement: [SELECT, UPDATE, DELETE]
+      has_cross_join: true
+    action: BLOCK
+    sqlstate: "42601"
+    message: "QueryGuard R6: cross join or missing join condition."
+
+  - id: R7
+    name: block-writes-outside-maintenance
+    priority: 60
+    when:
+      roles: [app_readonly]
+      statement: [INSERT, UPDATE, DELETE]
+      outside_window: { days: [SAT, SUN], from: "02:00", to: "04:00", tz: "UTC" }
+    action: BLOCK
+    sqlstate: "25006"
+    message: "QueryGuard R7: writes are only allowed in the maintenance window."
+
+  - id: R4
+    name: cap-analyst-result-size
+    priority: 90
+    when:
+      roles: [analyst]
+      statement: [SELECT]
+      has_limit: false
+    action: REWRITE
+    rewrite:
+      add_limit: 1000
+    message: "QueryGuard R4: added LIMIT 1000."
