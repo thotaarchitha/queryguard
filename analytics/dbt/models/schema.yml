@@ -1,0 +1,52 @@
+version: 2
+
+models:
+  - name: stg_query_events
+    columns:
+      - name: event_id
+        tests: [not_null, unique]
+      - name: decision
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['ALLOW', 'REWRITE', 'BLOCK']
+      - name: role
+        tests:
+          - accepted_values:
+              values: ['admin', 'analyst', 'app', 'etl', 'app_readonly']
+              config:
+                severity: warn   # a new role mapping shouldn't break the build, but should be noticed
+      - name: rule_family
+        tests:
+          - accepted_values:
+              values: ['none', 'policy', 'masking', 'failsafe']
+      - name: fingerprint
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_query_shapes')
+              field: fingerprint
+
+  - name: dim_query_shapes
+    columns:
+      - name: fingerprint
+        tests: [not_null, unique]
+      - name: block_rate
+        tests:
+          - within_range:
+              min: 0
+              max: 1
+
+  - name: fct_rule_activity_daily
+    columns:
+      - name: rule_id
+        tests: [not_null]
+      - name: decision
+        tests:
+          - accepted_values:
+              values: ['REWRITE', 'BLOCK']
+
+  - name: user_activity_daily
+    columns:
+      - name: db_user
+        tests: [not_null]

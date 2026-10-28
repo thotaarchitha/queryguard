@@ -1,0 +1,15 @@
+version: 2
+
+sources:
+  - name: qg
+    schema: qg
+    description: Written by the streaming path (Kafka engine + materialized views), not by dbt.
+    tables:
+      - name: query_events
+        description: One row per query the proxy saw. Normalized SQL only, never literal values.
+        loaded_at_field: ts
+        freshness:
+          warn_after: { count: 10, period: minute }
+          error_after: { count: 1, period: hour }
+      - name: query_events_errors
+        description: Kafka messages that didn't parse as events.

@@ -1,0 +1,11 @@
+queryguard:
+  target: local
+  outputs:
+    local:
+      type: clickhouse
+      host: "{{ env_var('CLICKHOUSE_HOST', 'localhost') }}"
+      port: 8123
+      user: "{{ env_var('CLICKHOUSE_USER', 'qg') }}"
+      password: "{{ env_var('CLICKHOUSE_PASSWORD', 'qg') }}"
+      schema: qg
+      threads: 4
