@@ -1,0 +1,61 @@
+server:
+  port: ${QG_ADMIN_API_PORT:8080}
+  shutdown: graceful
+
+spring:
+  application:
+    name: queryguard-admin
+  datasource:
+    url: ${QG_CONFIG_DB_URL:jdbc:postgresql://localhost:5432/queryguard_config}
+    username: ${QG_CONFIG_DB_USER:qg_config}
+    password: ${QG_CONFIG_DB_PASSWORD:qg_config}
+    hikari:
+      maximum-pool-size: 10
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+    default-property-inclusion: non_null
+    mapper:
+      accept-case-insensitive-enums: true
+  mvc:
+    problemdetails:
+      enabled: true
+  flyway:
+    locations: classpath:db/migration
+
+queryguard:
+  seed-file: ${QG_RULES_FILE:infra/rules/default-rules.yml}
+  # HS256 needs at least 256 bits. This default is for the local demo only;
+  # docker compose and Helm pass a real one.
+  jwt-secret: ${QG_JWT_SECRET:local-dev-only-secret-change-me-0123456789abcdef}
+  token-ttl: 1h
+  users:
+    admin:
+      password: ${QG_ADMIN_PASSWORD:admin-dev}
+      roles: [QG_ADMIN]
+    viewer:
+      password: ${QG_VIEWER_PASSWORD:viewer-dev}
+      roles: [QG_VIEWER]
+  shop:
+    host: ${QG_PG_HOST:localhost}
+    port: ${QG_PG_PORT:5432}
+    database: ${QG_SHOP_DB:shop}
+    explain-user: ${QG_EXPLAIN_USER:qg_explain}
+    explain-password: ${QG_EXPLAIN_PASSWORD:qg_explain}
+  clickhouse:
+    url: ${QG_CLICKHOUSE_URL:http://localhost:8123}
+    user: ${QG_CLICKHOUSE_USER:qg}
+    password: ${QG_CLICKHOUSE_PASSWORD:qg}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
