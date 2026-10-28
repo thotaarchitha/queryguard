@@ -1,0 +1,59 @@
+image:
+  registry: ghcr.io/thotaarchitha
+  tag: latest
+  pullPolicy: IfNotPresent
+
+postgres:
+  host: qg-postgres-postgresql
+  port: 5432
+  configDatabase: queryguard_config
+
+kafka:
+  # empty = don't publish query events
+  bootstrap: ""
+  topic: qg.query-events
+
+clickhouse:
+  url: ""
+
+# Secrets. Leave existingSecret empty for the demo and the chart creates one from these values;
+# in a real install, point existingSecret at a secret managed by sealed-secrets / external-secrets.
+secrets:
+  existingSecret: ""
+  explainPassword: qg_explain
+  configPassword: qg_config
+  jwtSecret: change-me-please-this-is-not-a-real-secret-0123456789
+  adminPassword: admin-dev
+  viewerPassword: viewer-dev
+
+proxy:
+  replicas: 2
+  maxConnections: 2000
+  idleTimeoutSeconds: 600
+  shutdownGraceSeconds: 30
+  service:
+    type: ClusterIP
+    port: 6432
+  resources:
+    requests: { cpu: 250m, memory: 384Mi }
+    limits: { cpu: "2", memory: 768Mi }
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 70
+  pdb:
+    minAvailable: 1
+
+adminApi:
+  replicas: 1
+  service:
+    type: ClusterIP
+    port: 8080
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 512Mi }
+
+# The rules seed + settings. Mounted into both services. Edit here, or after install use the
+# admin API (the config DB wins once seeded).
+rulesFile: ""

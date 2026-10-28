@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-admin-api
+  labels: {{- include "qg.labels" . | nindent 4 }}
+    app.kubernetes.io/name: queryguard-admin-api
+spec:
+  replicas: {{ .Values.adminApi.replicas }}
+  selector:
+    matchLabels: { app.kubernetes.io/name: queryguard-admin-api, app.kubernetes.io/instance: {{ .Release.Name }} }
+  template:
+    metadata:
+      labels: {{- include "qg.labels" . | nindent 8 }}
+        app.kubernetes.io/name: queryguard-admin-api
+      annotations:
+        checksum/rules: {{ include (print $.Template.BasePath "/config.yaml") . | sha256sum }}
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 100, fsGroup: 101 }
+      containers:
+        - name: admin-api
+          image: "{{ .Values.image.registry }}/queryguard-admin-api:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - { name: http, containerPort: 8080 }
+          env:
+            {{- include "qg.pgEnv" . | nindent 12 }}
+            - { name: QG_CLICKHOUSE_URL, value: {{ .Values.clickhouse.url | quote }} }
+            - name: QG_JWT_SECRET
+              valueFrom: { secretKeyRef: { name: {{ include "qg.secretName" . }}, key: jwt-secret } }
+            - name: QG_ADMIN_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ include "qg.secretName" . }}, key: admin-password } }
+            - name: QG_VIEWER_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ include "qg.secretName" . }}, key: viewer-password } }
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: http }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            initialDelaySeconds: 40
+            periodSeconds: 10
+          resources: {{- toYaml .Values.adminApi.resources | nindent 12 }}
+          volumeMounts:
+            - { name: rules, mountPath: /etc/queryguard, readOnly: true }
+      volumes:
+        - name: rules
+          configMap: { name: {{ .Release.Name }}-rules }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-admin-api
+  labels: {{- include "qg.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.adminApi.service.type }}
+  selector: { app.kubernetes.io/name: queryguard-admin-api, app.kubernetes.io/instance: {{ .Release.Name }} }
+  ports:
+    - { name: http, port: {{ .Values.adminApi.service.port }}, targetPort: http }

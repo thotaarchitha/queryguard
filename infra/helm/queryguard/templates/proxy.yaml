@@ -1,0 +1,103 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-proxy
+  labels: {{- include "qg.labels" . | nindent 4 }}
+    app.kubernetes.io/name: queryguard-proxy
+spec:
+  {{- if not .Values.proxy.autoscaling.enabled }}
+  replicas: {{ .Values.proxy.replicas }}
+  {{- end }}
+  selector:
+    matchLabels: { app.kubernetes.io/name: queryguard-proxy, app.kubernetes.io/instance: {{ .Release.Name }} }
+  template:
+    metadata:
+      labels: {{- include "qg.labels" . | nindent 8 }}
+        app.kubernetes.io/name: queryguard-proxy
+      annotations:
+        checksum/rules: {{ include (print $.Template.BasePath "/config.yaml") . | sha256sum }}
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8081"
+        prometheus.io/path: /metrics
+    spec:
+      # Longer than the proxy's own drain (QG_SHUTDOWN_GRACE_S) so Kubernetes doesn't SIGKILL mid-drain.
+      terminationGracePeriodSeconds: {{ add .Values.proxy.shutdownGraceSeconds 15 }}
+      securityContext: { runAsNonRoot: true, runAsUser: 100, fsGroup: 101 }
+      containers:
+        - name: proxy
+          image: "{{ .Values.image.registry }}/queryguard-proxy:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - { name: postgres, containerPort: 6432 }
+            - { name: admin, containerPort: 8081 }
+          env:
+            {{- include "qg.pgEnv" . | nindent 12 }}
+            - { name: QG_LISTEN_PORT, value: "6432" }
+            - { name: QG_ADMIN_PORT, value: "8081" }
+            - { name: QG_MAX_CONNECTIONS, value: {{ .Values.proxy.maxConnections | quote }} }
+            - { name: QG_IDLE_TIMEOUT_S, value: {{ .Values.proxy.idleTimeoutSeconds | quote }} }
+            - { name: QG_SHUTDOWN_GRACE_S, value: {{ .Values.proxy.shutdownGraceSeconds | quote }} }
+            - { name: QG_KAFKA_BOOTSTRAP, value: {{ .Values.kafka.bootstrap | quote }} }
+            - { name: QG_KAFKA_TOPIC, value: {{ .Values.kafka.topic | quote }} }
+            - name: QG_INSTANCE
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+          readinessProbe:
+            httpGet: { path: /health/ready, port: admin }
+            periodSeconds: 5
+            failureThreshold: 2
+          livenessProbe:
+            httpGet: { path: /health/live, port: admin }
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          lifecycle:
+            # Give endpoints a moment to drop this pod before we stop accepting.
+            preStop: { exec: { command: ["sleep", "5"] } }
+          resources: {{- toYaml .Values.proxy.resources | nindent 12 }}
+          volumeMounts:
+            - { name: rules, mountPath: /etc/queryguard, readOnly: true }
+      volumes:
+        - name: rules
+          configMap: { name: {{ .Release.Name }}-rules }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-proxy
+  labels: {{- include "qg.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.proxy.service.type }}
+  selector: { app.kubernetes.io/name: queryguard-proxy, app.kubernetes.io/instance: {{ .Release.Name }} }
+  ports:
+    - { name: postgres, port: {{ .Values.proxy.service.port }}, targetPort: postgres }
+    - { name: admin, port: 8081, targetPort: admin }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ .Release.Name }}-proxy
+  labels: {{- include "qg.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.proxy.pdb.minAvailable }}
+  selector:
+    matchLabels: { app.kubernetes.io/name: queryguard-proxy, app.kubernetes.io/instance: {{ .Release.Name }} }
+{{- if .Values.proxy.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ .Release.Name }}-proxy
+  labels: {{- include "qg.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: {{ .Release.Name }}-proxy }
+  minReplicas: {{ .Values.proxy.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.proxy.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: {{ .Values.proxy.autoscaling.targetCPUUtilizationPercentage }} }
+  behavior:
+    # Proxied connections are long-lived; scaling down kills them, so be slow about it.
+    scaleDown:
+      stabilizationWindowSeconds: 600
+{{- end }}

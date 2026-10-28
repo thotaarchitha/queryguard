@@ -1,0 +1,11 @@
+apiVersion: v2
+name: queryguard
+description: PostgreSQL proxy that blocks dangerous SQL and masks sensitive columns, plus its admin API.
+type: application
+version: 0.9.0
+appVersion: "0.9.0"
+keywords: [postgresql, proxy, sql, data-governance]
+home: https://github.com/thotaarchitha/queryguard
+# Postgres, Kafka and ClickHouse are deliberately not dependencies of this chart. In a real
+# cluster they're shared, managed separately, and have their own lifecycles. `make k8s-up`
+# installs throwaway ones next to it for the demo.

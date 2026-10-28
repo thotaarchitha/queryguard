@@ -6,8 +6,12 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   build-test:
+    name: Build, unit + integration tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -16,9 +20,95 @@ jobs:
           distribution: temurin
           java-version: "21"
       - uses: gradle/actions/setup-gradle@v4
-      - run: ./gradlew build
+      - name: Unit tests
+        run: ./gradlew build
+      - name: Integration tests (Testcontainers: Postgres 16)
+        run: ./gradlew integrationTest
+      - name: Coverage report
+        run: ./gradlew jacocoTestReport
       - if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-reports
-          path: "**/build/reports/tests/"
+          name: test-and-coverage-reports
+          path: |
+            **/build/reports/tests/
+            **/build/reports/jacoco/
+            **/build/test-results/
+
+  lint:
+    name: Lint (Helm, Dockerfiles, chart drift)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - run: helm lint infra/helm/queryguard
+      - run: helm template qg infra/helm/queryguard > /dev/null
+      - name: Chart has the current default rules
+        run: diff -u infra/rules/default-rules.yml infra/helm/queryguard/files/default-rules.yml
+      - name: Dashboards match their generator
+        run: |
+          python3 analytics/grafana/build_dashboards.py
+          git diff --exit-code analytics/grafana/dashboards
+      - uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: proxy/Dockerfile
+      - uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: admin-api/Dockerfile
+
+  smoke:
+    name: Smoke test (docker compose + demo script)
+    runs-on: ubuntu-latest
+    needs: build-test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start the stack
+        run: docker compose up -d --build --wait --wait-timeout 600
+      - name: Run every rule through psql
+        run: |
+          docker run --rm --network queryguard_default -v "$PWD/infra/demo:/demo" postgres:16 \
+            psql -X -v qg_host=proxy "postgresql://postgres:dev@proxy:6432/shop" -f /demo/rules.sql 2>&1 | tee demo.out
+          for rule in R1 R2 R3 R5 R6 R7 R8 M1; do
+            grep -q "QueryGuard $rule" demo.out || { echo "expected $rule to fire"; exit 1; }
+          done
+          grep -q "u\*\*\*@\*\*\*.com" demo.out || { echo "expected masked emails"; exit 1; }
+      - name: Events reached ClickHouse
+        run: |
+          sleep 10
+          n=$(docker compose exec -T clickhouse clickhouse-client -u qg --password qg -q "SELECT count() FROM qg.query_events")
+          echo "events: $n"; test "$n" -gt 0
+      - if: failure()
+        run: docker compose logs --tail 200
+
+  images:
+    name: Publish images
+    runs-on: ubuntu-latest
+    needs: [build-test, lint, smoke]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: proxy/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/queryguard-proxy:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/queryguard-proxy:latest
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: admin-api/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/queryguard-admin-api:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/queryguard-admin-api:latest

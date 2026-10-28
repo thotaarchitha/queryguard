@@ -1,0 +1,13 @@
+QueryGuard is installed.
+
+  Proxy (point psql/JDBC here instead of Postgres):
+    kubectl port-forward svc/{{ .Release.Name }}-proxy 6432:{{ .Values.proxy.service.port }}
+    psql "postgresql://bob:bob@localhost:6432/shop" -c "DELETE FROM orders"   # should be blocked by R1
+
+  Admin API (Swagger at /swagger-ui.html):
+    kubectl port-forward svc/{{ .Release.Name }}-admin-api 8080:{{ .Values.adminApi.service.port }}
+
+{{- if not .Values.secrets.existingSecret }}
+
+  You're using the chart's demo secrets. Set secrets.existingSecret before this goes anywhere real.
+{{- end }}
