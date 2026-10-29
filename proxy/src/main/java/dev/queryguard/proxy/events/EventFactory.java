@@ -28,7 +28,7 @@ public final class EventFactory {
         e.database = s.database();
         e.clientIp = s.clientIp();
         e.application = s.application();
-        e.statementType = q.primaryKind().name();
+        e.statementType = statementType(q);
         e.fingerprint = q.fingerprint();
         e.sqlNormalized = truncate(q.normalized(), 4000);
         e.tables = java.util.List.copyOf(q.tables());
@@ -38,6 +38,20 @@ public final class EventFactory {
         e.estimatedRows = d.estimatedRows();
         e.decisionLatencyUs = decisionNanos / 1000;
         return e;
+    }
+
+    /**
+     * A decision that timed out never got as far as parsing, so the query has no statements.
+     * The first keyword still says SELECT or UPDATE, which is better than OTHER on a dashboard.
+     */
+    private static String statementType(QueryInfo q) {
+        if (!q.isEmpty()) {
+            return q.primaryKind().name();
+        }
+        String n = q.normalized();
+        int space = n.indexOf(' ');
+        String first = space < 0 ? n : n.substring(0, space);
+        return first.isEmpty() ? "OTHER" : dev.queryguard.common.analysis.StatementKind.fromKeyword(first).name();
     }
 
     public String newId() {

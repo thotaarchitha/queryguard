@@ -108,6 +108,15 @@ class RuleEngineTest {
     }
 
     @Test
+    void r4KeepsTheClientsTextAndWorksAfterOrderByAndUnion() {
+        assertThat(eval("alice", "SELECT id FROM orders WHERE status = 'paid' ORDER BY id DESC").rewrittenSql())
+                .isEqualTo("SELECT id FROM orders WHERE status = 'paid' ORDER BY id DESC LIMIT 1000");
+        assertThat(eval("alice", "SELECT id FROM orders UNION SELECT id FROM products").rewrittenSql())
+                .endsWith("LIMIT 1000");
+        assertThat(eval("alice", "SELECT id FROM orders OFFSET 10").rewrittenSql()).endsWith("OFFSET 10 LIMIT 1000");
+    }
+
+    @Test
     void r4LeavesLockingSelectsAlone() {
         assertThat(eval("alice", "SELECT id FROM orders WHERE id = 1 FOR UPDATE").verdict()).isEqualTo(Verdict.ALLOW);
     }
@@ -172,6 +181,13 @@ class RuleEngineTest {
         assertThat(eval("bob", "SELECT 1 WHERE 'a' OPERATOR(pg_catalog.~) 'b'").verdict()).isEqualTo(Verdict.ALLOW);
         assertThat(eval("bob", "UPDATE orders SET status = 'x' WHERE id OPERATOR(pg_catalog.=) 1").ruleId())
                 .isEqualTo("QG-PARSE");
+    }
+
+    @Test
+    void maintenanceCommandsPassEvenThoughJsqlparserCantReadThem() {
+        // pgbench vacuums its tables before every run; this used to be refused as an unparseable write
+        assertThat(eval("bob", "VACUUM pgbench_branches").verdict()).isEqualTo(Verdict.ALLOW);
+        assertThat(eval("bob", "ANALYZE orders").verdict()).isEqualTo(Verdict.ALLOW);
     }
 
     @Test

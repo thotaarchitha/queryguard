@@ -369,11 +369,18 @@ public final class FrontendHandler extends ChannelInboundHandlerAdapter {
      * while we're deciding, the message bytes are released and the verdict is dropped.
      */
     private void decideThen(ChannelHandlerContext ctx, String sql, ByteBuf raw, java.util.function.Consumer<Verdict> then) {
-        deciding = true;
         Session s = conn.session;
         ActivePolicy policy = services.policies().current();
         s.role(policy.config().roleFor(s.user())); // role mapping can change on reload
-        services.decider().decide(s.user(), s.role(), s.database(), sql).whenComplete((verdict, err) ->
+
+        // Fast path: a known query shape with everything cached is decided right here.
+        Verdict inline = services.decider().tryInline(s.user(), s.role(), s.database(), sql);
+        if (inline != null) {
+            then.accept(inline);
+            return;
+        }
+        deciding = true;
+        services.decider().decide(s.user(), s.role(), s.database(), sql, ctx.channel().eventLoop()).whenComplete((verdict, err) ->
                 ctx.channel().eventLoop().execute(() -> {
                     deciding = false;
                     if (!ctx.channel().isActive()) {

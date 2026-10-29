@@ -9,6 +9,7 @@ public enum StatementKind {
     EXPLAIN,       // plain EXPLAIN only; EXPLAIN ANALYZE is classified as what it runs
     TRANSACTION,   // BEGIN, COMMIT, ROLLBACK, SAVEPOINT...
     SESSION,       // SET, SHOW, RESET, DISCARD, LISTEN...
+    MAINTENANCE,   // VACUUM, ANALYZE, REINDEX, CLUSTER, CHECKPOINT: housekeeping, doesn't change data
     OTHER;
 
     public boolean isWrite() {
@@ -30,7 +31,7 @@ public enum StatementKind {
      * A psql {@code \d} query that JSqlParser can't read is still just a SELECT.
      */
     public boolean isSafeWhenUnparsed() {
-        return this == SELECT || this == EXPLAIN || this == TRANSACTION || this == SESSION;
+        return this == SELECT || this == EXPLAIN || this == TRANSACTION || this == SESSION || this == MAINTENANCE;
     }
 
     /** Rule files can say {@code DDL} or {@code WRITE} instead of listing every kind. */
@@ -52,7 +53,8 @@ public enum StatementKind {
             case "delete" -> DELETE;
             case "merge" -> MERGE;
             case "create" -> CREATE;
-            case "alter", "comment", "vacuum", "reindex", "cluster", "refresh" -> ALTER;
+            case "alter", "comment", "refresh" -> ALTER;
+            case "vacuum", "analyze", "analyse", "reindex", "cluster", "checkpoint" -> MAINTENANCE;
             case "drop" -> DROP;
             case "truncate" -> TRUNCATE;
             case "grant" -> GRANT;

@@ -62,20 +62,45 @@ public final class QueryAnalyzer {
     }
 
     public QueryInfo analyze(String sql) {
+        return analyze(sql, false);
+    }
+
+    /**
+     * Same as {@link #analyze}, but never runs the parser: returns null unless every statement's
+     * shape is already cached. Cheap enough (a few microseconds) to run on a network thread;
+     * anything that would actually parse is left for a worker thread.
+     */
+    public QueryInfo analyzeIfCached(String sql) {
+        try {
+            return analyze(sql, true);
+        } catch (NotCached e) {
+            return null;
+        }
+    }
+
+    private static final class NotCached extends RuntimeException {
+        NotCached() {
+            super(null, null, false, false); // no stack trace; this is control flow
+        }
+    }
+
+    private static final NotCached NOT_CACHED = new NotCached();
+
+    private QueryInfo analyze(String sql, boolean cachedOnly) {
         List<Token> tokens = SqlLexer.tokenize(sql);
         String normalized = SqlLexer.normalize(tokens);
         List<StatementInfo> infos = new ArrayList<>();
         for (List<Token> part : SqlLexer.splitStatements(tokens)) {
-            infos.add(analyzeStatement(sql, part));
+            infos.add(analyzeStatement(sql, part, cachedOnly));
         }
         return new QueryInfo(sql, normalized, Fingerprints.of(normalized), infos);
     }
 
-    private StatementInfo analyzeStatement(String fullSql, List<Token> part) {
+    private StatementInfo analyzeStatement(String fullSql, List<Token> part, boolean cachedOnly) {
         String slice = fullSql.substring(part.get(0).start(), part.get(part.size() - 1).end());
 
         if (part.get(0).isWord("explain")) {
-            return analyzeExplain(fullSql, slice, part);
+            return analyzeExplain(fullSql, slice, part, cachedOnly);
         }
 
         StatementInfo info = new StatementInfo(slice, part);
@@ -93,6 +118,9 @@ public final class QueryAnalyzer {
                 info.astLoader = () -> CCJSqlParserUtil.parse(forParser(slice, part));
             }
             return info;
+        }
+        if (cachedOnly) {
+            throw NOT_CACHED;
         }
         try {
             Statement st = CCJSqlParserUtil.parse(forParser(slice, part));
@@ -143,7 +171,7 @@ public final class QueryAnalyzer {
      * {@code EXPLAIN SELECT} is harmless; {@code EXPLAIN ANALYZE DELETE FROM orders} deletes
      * everything. So with ANALYZE we classify the statement as whatever it runs.
      */
-    private StatementInfo analyzeExplain(String fullSql, String slice, List<Token> part) {
+    private StatementInfo analyzeExplain(String fullSql, String slice, List<Token> part, boolean cachedOnly) {
         int k = 1;
         boolean analyze = false;
         if (k < part.size() && part.get(k).isPunct("(")) {
@@ -177,7 +205,7 @@ public final class QueryAnalyzer {
             bare.fingerprint = Fingerprints.of(SqlLexer.normalize(part));
             return bare;
         }
-        StatementInfo inner = analyzeStatement(fullSql, part.subList(k, part.size()));
+        StatementInfo inner = analyzeStatement(fullSql, part.subList(k, part.size()), cachedOnly);
         if (analyze) {
             inner.explainAnalyze = true;
             return inner;

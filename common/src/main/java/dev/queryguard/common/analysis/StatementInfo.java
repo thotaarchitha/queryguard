@@ -38,7 +38,7 @@ public final class StatementInfo {
     Statement ast;
     /** Set when the facts came from the shape cache: parse this query's own text only if someone needs the AST. */
     java.util.concurrent.Callable<Statement> astLoader;
-    boolean rewritten;
+    Integer addedLimit;
 
     StatementInfo(String sql, List<SqlLexer.Token> tokens) {
         this.sql = sql;
@@ -124,12 +124,13 @@ public final class StatementInfo {
         return ast;
     }
 
-    public boolean rewritten() {
-        return rewritten;
+    /** Set by a REWRITE rule: the LIMIT to append. Several rules can stack; the smallest wins. */
+    public Integer addedLimit() {
+        return addedLimit;
     }
 
-    public void markRewritten() {
-        this.rewritten = true;
+    public void addLimit(int limit) {
+        addedLimit = addedLimit == null ? limit : Math.min(addedLimit, limit);
     }
 
     @Override

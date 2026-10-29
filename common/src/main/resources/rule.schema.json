@@ -32,7 +32,7 @@
           "minItems": 1,
           "items": {
             "enum": ["SELECT", "INSERT", "UPDATE", "DELETE", "MERGE", "CREATE", "ALTER", "DROP", "TRUNCATE",
-                     "GRANT", "REVOKE", "COPY", "CALL", "DO", "EXPLAIN", "TRANSACTION", "SESSION", "OTHER",
+                     "GRANT", "REVOKE", "COPY", "CALL", "DO", "EXPLAIN", "TRANSACTION", "SESSION", "MAINTENANCE", "OTHER",
                      "DDL", "WRITE", "ANY"]
           }
         },

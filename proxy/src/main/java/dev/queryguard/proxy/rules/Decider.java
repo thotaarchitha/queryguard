@@ -94,7 +94,69 @@ public final class Decider implements AutoCloseable {
         log.info("Analyzer warmed up in {} ms", (System.nanoTime() - t0) / 1_000_000);
     }
 
+    private static final java.util.concurrent.ScheduledExecutorService FALLBACK_TIMER =
+            Executors.newSingleThreadScheduledExecutor(Thread.ofPlatform().daemon().name("qg-decision-timer").factory());
+
+    /** Thrown inside the inline path when a rule needs a cost that isn't cached yet. */
+    private static final class NeedsWorker extends RuntimeException {
+        NeedsWorker() {
+            super(null, null, false, false);
+        }
+    }
+
+    private static final NeedsWorker NEEDS_WORKER = new NeedsWorker();
+
+    /**
+     * The fast path, run on the event loop. Returns a verdict only if it can be reached without
+     * blocking: every statement shape already cached (no JSqlParser), masking metadata for this
+     * database and policy version loaded, and any cost a rule asks for already in the EXPLAIN
+     * cache. Otherwise null, and the caller takes the worker-thread path.
+     *
+     * Why: a cache-hit decision is ~5 us of CPU. Handing it to a virtual thread and back cost
+     * more than the decision itself (bench/RESULTS.md). "Never block the event loop" is about
+     * blocking, not about doing a few microseconds of work on it.
+     */
+    public Verdict tryInline(String user, String role, String database, String sql) {
+        long start = System.nanoTime();
+        ActivePolicy policy = policies.current();
+        boolean roleIsMasked = policy.config().masking().stream().anyMatch(r -> r.appliesTo(role));
+        if (roleIsMasked && !maskTargets.isLoaded(database, policy.version())) {
+            return null;
+        }
+        QueryInfo query = analyzer.analyzeIfCached(sql);
+        if (query == null) {
+            return null;
+        }
+        CostLookup costs = st -> {
+            CostEstimate cached = costCache.getIfPresent(database + ":" + st.fingerprint());
+            if (cached == null) {
+                throw NEEDS_WORKER;
+            }
+            return cached;
+        };
+        Decision d;
+        try {
+            d = policy.engine().evaluate(query, new EvalContext(user, role, Instant.now(), costs));
+        } catch (NeedsWorker e) {
+            return null;
+        }
+        long nanos = System.nanoTime() - start;
+        metrics.decision(d.verdict().name(), nanos);
+        return new Verdict(query, d, nanos);
+    }
+
+    /** For callers without an event loop (tests, tools). */
     public CompletableFuture<Verdict> decide(String user, String role, String database, String sql) {
+        return decide(user, role, database, sql, FALLBACK_TIMER);
+    }
+
+    /**
+     * {@code timer} is the connection's own event loop. CompletableFuture.orTimeout() would put
+     * every query's deadline into one JDK-wide scheduler queue behind one lock, which showed up
+     * in the profiler at a few thousand queries a second; each event loop has its own.
+     */
+    public CompletableFuture<Verdict> decide(String user, String role, String database, String sql,
+                                             java.util.concurrent.ScheduledExecutorService timer) {
         long start = System.nanoTime();
         ActivePolicy policy = policies.current();
         int timeoutMs = policy.config().settings().decisionTimeoutMs();
@@ -102,7 +164,7 @@ public final class Decider implements AutoCloseable {
         // Resolving masked columns is a one-time cost per database (first connection, catalog
         // query). It gets its own, longer budget so it doesn't eat the per-query timeout.
         boolean roleIsMasked = policy.config().masking().stream().anyMatch(r -> r.appliesTo(role));
-        CompletableFuture<Boolean> masking = !roleIsMasked || !maskTargets.peek(database).isEmpty()
+        CompletableFuture<Boolean> masking = !roleIsMasked || maskTargets.isLoaded(database)
                 ? CompletableFuture.completedFuture(true)
                 : CompletableFuture.supplyAsync(() -> loadMasking(database, policy), executor)
                         .orTimeout(MASKING_LOAD_TIMEOUT_MS, TimeUnit.MILLISECONDS)
@@ -111,8 +173,8 @@ public final class Decider implements AutoCloseable {
         return masking
                 .thenCompose(ok -> !ok
                         ? CompletableFuture.completedFuture(maskingUnavailable(sql, role, start))
-                        : CompletableFuture.supplyAsync(() -> evaluate(user, role, database, sql, policy, start), executor)
-                                .orTimeout(timeoutMs, TimeUnit.MILLISECONDS))
+                        : withDeadline(CompletableFuture.supplyAsync(
+                                () -> evaluate(user, role, database, sql, policy, start), executor), timeoutMs, timer))
                 .exceptionally(err -> onFailure(err, sql, role, policy, start))
                 .whenComplete((v, e) -> {
                     if (v != null) {
@@ -122,6 +184,13 @@ public final class Decider implements AutoCloseable {
     }
 
     private static final int MASKING_LOAD_TIMEOUT_MS = 5000;
+
+    private static <T> CompletableFuture<T> withDeadline(CompletableFuture<T> f, int ms,
+                                                         java.util.concurrent.ScheduledExecutorService timer) {
+        var deadline = timer.schedule(() -> f.completeExceptionally(new TimeoutException()), ms, TimeUnit.MILLISECONDS);
+        f.whenComplete((v, e) -> deadline.cancel(false));
+        return f;
+    }
 
     private boolean loadMasking(String database, ActivePolicy policy) {
         try {
@@ -172,7 +241,7 @@ public final class Decider implements AutoCloseable {
             costCache.put(key, fresh);
             return fresh;
         } catch (CostUnavailableException e) {
-            explainBackoffUntil = System.nanoTime() + EXPLAIN_BACKOFF_NANOS;
+            explainBackoffUntil = System.nanoTime() + explainBackoffNanos;
             if (!estimate) {
                 throw e;
             }
@@ -181,8 +250,13 @@ public final class Decider implements AutoCloseable {
         }
     }
 
-    private static final long EXPLAIN_BACKOFF_NANOS = TimeUnit.SECONDS.toNanos(2);
+    private long explainBackoffNanos = TimeUnit.SECONDS.toNanos(2);
     private volatile long explainBackoffUntil;
+
+    /** Tests on a slow CI box can't rely on finishing inside a 2 s window. */
+    void explainBackoff(java.time.Duration d) {
+        explainBackoffNanos = d.toNanos();
+    }
 
     /** The whole decision blew its time budget or threw. What happens next is the fail-open/closed setting. */
     private Verdict onFailure(Throwable err, String sql, String role, ActivePolicy policy, long start) {

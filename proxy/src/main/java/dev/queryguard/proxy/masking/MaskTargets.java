@@ -85,6 +85,16 @@ public final class MaskTargets {
      * policy is reloaded between a query's decision and its RowDescription, masking with
      * the previous version's columns is right; masking with nothing would be a leak.
      */
+    /** Loaded for exactly this policy version (non-blocking). */
+    public boolean isLoaded(String database, long configVersion) {
+        return cache.getIfPresent(database + "@" + configVersion) != null;
+    }
+
+    /** Loaded at least once, even if nothing in this database is masked (empty is a valid answer). */
+    public boolean isLoaded(String database) {
+        return latest.containsKey(database);
+    }
+
     public Resolved peek(String database) {
         Resolved r = latest.get(database);
         return r == null ? NONE : r;
