@@ -38,24 +38,20 @@ bench-pgbench:
 chart-sync:
 	cp infra/rules/default-rules.yml infra/helm/queryguard/files/default-rules.yml
 
-# Local Kubernetes: kind cluster, demo Postgres (Bitnami chart, seeded from infra/seed),
-# QueryGuard from locally built images, then a smoke test through the proxy Service.
+# Local Kubernetes: kind cluster, a throwaway Postgres seeded from infra/seed, QueryGuard from
+# locally built images, then a smoke test through the proxy Service. Kafka/ClickHouse aren't
+# deployed here (the proxy just runs with events off).
 k8s-up: chart-sync
 	kind create cluster --name $(CLUSTER) || true
 	docker build -t ghcr.io/thotaarchitha/queryguard-proxy:$(TAG) -f proxy/Dockerfile .
 	docker build -t ghcr.io/thotaarchitha/queryguard-admin-api:$(TAG) -f admin-api/Dockerfile .
 	kind load docker-image --name $(CLUSTER) ghcr.io/thotaarchitha/queryguard-proxy:$(TAG) ghcr.io/thotaarchitha/queryguard-admin-api:$(TAG)
-	kubectl create configmap qg-seed --from-file=infra/seed --dry-run=client -o yaml | kubectl apply -f -
-	helm repo add bitnami https://charts.bitnami.com/bitnami >/dev/null 2>&1 || true
-	helm upgrade --install qg-postgres bitnami/postgresql --wait --timeout 10m \
-	  --set auth.postgresPassword=dev --set auth.database=shop \
-	  --set primary.initdb.scriptsConfigMap=qg-seed
-	helm upgrade --install qg infra/helm/queryguard --wait --timeout 5m \
-	  --set image.tag=$(TAG) --set image.pullPolicy=Never
-	kubectl run qg-smoke --rm -i --restart=Never --image=postgres:16 -- \
-	  psql "postgresql://bob:bob@qg-proxy:6432/shop" -c "DELETE FROM orders" 2>&1 | grep -q "QueryGuard R1" \
-	  && echo "smoke test passed: R1 blocked through the proxy Service" \
-	  || (echo "smoke test FAILED" && exit 1)
+	# 01-/02- prefixes: init scripts run alphabetically, and the grants need the tables to exist
+	kubectl create configmap qg-seed --from-file=01-seed.sql=infra/seed/seed.sql --from-file=02-roles.sql=infra/seed/02-roles.sql --dry-run=client -o yaml | kubectl apply -f -
+	kubectl apply -f infra/k8s/postgres-demo.yaml
+	kubectl rollout status deploy/qg-postgres --timeout=10m
+	helm upgrade --install qg infra/helm/queryguard --wait --timeout 5m --set image.tag=$(TAG) --set image.pullPolicy=Never --set postgres.host=qg-postgres
+	kubectl run qg-smoke --rm -i --restart=Never --image=postgres:16 -- psql "postgresql://bob:bob@qg-proxy:6432/shop" -c "DELETE FROM orders" 2>&1 | grep -q "QueryGuard R1" && echo "smoke test passed: R1 blocked through the proxy Service" || (echo "smoke test FAILED" && exit 1)
 
 k8s-down:
 	kind delete cluster --name $(CLUSTER)

@@ -1,0 +1,52 @@
+# Throwaway Postgres for the kind demo (make k8s-up). Not for anything real: no persistence,
+# demo passwords. In a real cluster QueryGuard points at a Postgres that's managed separately.
+#
+# The seed comes from a ConfigMap built from infra/seed (see the Makefile), mounted where the
+# postgres image runs init scripts.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qg-postgres
+  labels: { app.kubernetes.io/name: qg-postgres }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: qg-postgres }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: qg-postgres }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16
+          args: ["-c", "max_connections=300"]
+          env:
+            - { name: POSTGRES_PASSWORD, value: dev }
+            - { name: POSTGRES_DB, value: shop }
+          ports:
+            - { name: postgres, containerPort: 5432 }
+          readinessProbe:
+            # TCP on purpose; see docker-compose.yml
+            exec: { command: ["pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "shop"] }
+            periodSeconds: 5
+            failureThreshold: 60
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+            limits: { memory: 2Gi }
+          volumeMounts:
+            - { name: seed, mountPath: /docker-entrypoint-initdb.d, readOnly: true }
+            - { name: data, mountPath: /var/lib/postgresql/data }
+      volumes:
+        - name: seed
+          configMap: { name: qg-seed }
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qg-postgres
+spec:
+  selector: { app.kubernetes.io/name: qg-postgres }
+  ports:
+    - { name: postgres, port: 5432, targetPort: postgres }

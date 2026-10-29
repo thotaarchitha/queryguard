@@ -22,6 +22,9 @@ spec:
     spec:
       # Longer than the proxy's own drain (QG_SHUTDOWN_GRACE_S) so Kubernetes doesn't SIGKILL mid-drain.
       terminationGracePeriodSeconds: {{ add .Values.proxy.shutdownGraceSeconds 15 }}
+      # Service links inject env vars like QG_ADMIN_API_PORT=tcp://10.96.x.x:8080 for every Service,
+      # which collide with our own QG_* settings. Nothing here uses them.
+      enableServiceLinks: false
       securityContext: { runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, fsGroup: 10001 }
       containers:
         - name: proxy

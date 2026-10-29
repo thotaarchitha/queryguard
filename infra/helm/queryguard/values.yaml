@@ -4,7 +4,7 @@ image:
   pullPolicy: IfNotPresent
 
 postgres:
-  host: qg-postgres-postgresql
+  host: qg-postgres
   port: 5432
   configDatabase: queryguard_config
 

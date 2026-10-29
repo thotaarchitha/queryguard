@@ -153,6 +153,23 @@ rollups still count at insert time; that's documented as approximate.
 
 ---
 
+### 2026-10-29: the admin API crash-looped on Kubernetes, and only there
+
+**Symptom.** First real `helm install` on kind: two proxy pods ready, the admin API in CrashLoopBackOff.
+The log said it couldn't convert `"tcp://10.96.203.231:8080"` to an Integer.
+
+**Cause.** Kubernetes injects "service link" env vars for every Service in the namespace. A Service named
+`qg-admin-api` gives every pod `QG_ADMIN_API_PORT=tcp://10.96.203.231:8080`, and the admin API read its
+HTTP port from... `QG_ADMIN_API_PORT`. Docker Compose never sets those, so it had only ever worked by accident.
+
+**Fix.** `enableServiceLinks: false` on both deployments (nothing uses them), and the setting is now
+`QG_HTTP_PORT`, so it can't collide with a service name again.
+
+**Lesson.** `helm lint` and `helm template` passing says nothing about whether the thing runs. The chart
+had been "done" for a day before it was ever installed.
+
+---
+
 ### 2026-10-28: smaller ones
 
 - **Testcontainers vs Docker Engine 29.** Every container test failed with an empty `Status 400`.

@@ -147,6 +147,7 @@ infra/        seed data, rules, demo script, Helm chart
 ./gradlew build              # unit tests
 ./gradlew integrationTest    # Testcontainers: real Postgres 16 and real pgjdbc traffic
 make k8s-up                  # kind cluster + Helm chart + smoke test (needs kind, kubectl, helm)
+                             # tested on kind v0.33 / Kubernetes 1.37 with Helm 4
 ```
 
 No local Java? Prefix with `docker run --rm -v "$PWD:/src" -w /src gradle:8.10.2-jdk21`.
