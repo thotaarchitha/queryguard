@@ -56,6 +56,10 @@ subprojects {
     }
 
     tasks.withType<JacocoReport>().configureEach {
+        // Unit and integration runs together: the proxy's network handlers are mostly
+        // exercised by the integration tests, so unit-only coverage would undersell them.
+        executionData.setFrom(fileTree(layout.buildDirectory.dir("jacoco")).include("*.exec"))
+        mustRunAfter(tasks.withType<Test>())
         reports {
             xml.required.set(true)
             html.required.set(true)

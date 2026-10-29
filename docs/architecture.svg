@@ -1,0 +1,121 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="760" viewBox="0 0 1400 760" font-family="DejaVu Sans, Verdana, sans-serif">
+  <!-- Same three colors as the dashboards: teal = the normal path, amber = policy/control, vermilion = where queries get stopped -->
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8A877F"/>
+    </marker>
+    <marker id="t" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#4E8C82"/>
+    </marker>
+    <marker id="m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#E0A526"/>
+    </marker>
+  </defs>
+  <rect width="1400" height="760" fill="#14161A"/>
+
+  <text x="48" y="64" fill="#E8E4DA" font-size="30" font-weight="bold">QueryGuard</text>
+  <text x="48" y="94" fill="#8A877F" font-size="15">every query is read, decided and recorded before Postgres sees it</text>
+
+  <!-- clients -->
+  <g>
+    <rect x="48" y="170" width="190" height="230" rx="10" fill="#1D2026" stroke="#3A3E46"/>
+    <text x="68" y="202" fill="#E8E4DA" font-size="17" font-weight="bold">clients</text>
+    <text x="68" y="236" fill="#B8B4AA" font-size="14">psql</text>
+    <text x="68" y="262" fill="#B8B4AA" font-size="14">JDBC / DBeaver</text>
+    <text x="68" y="288" fill="#B8B4AA" font-size="14">psycopg</text>
+    <text x="68" y="314" fill="#B8B4AA" font-size="14">pgbench</text>
+    <text x="68" y="370" fill="#8A877F" font-size="12">no changes, just</text>
+    <text x="68" y="386" fill="#8A877F" font-size="12">port 6432</text>
+  </g>
+
+  <!-- proxy -->
+  <rect x="300" y="130" width="650" height="330" rx="12" fill="#1A1D22" stroke="#4E8C82" stroke-width="2"/>
+  <text x="324" y="164" fill="#E8E4DA" font-size="19" font-weight="bold">proxy</text>
+  <text x="392" y="164" fill="#8A877F" font-size="13">Java 21 · Netty · one event loop per connection pair</text>
+
+  <rect x="324" y="190" width="150" height="74" rx="8" fill="#22262C"/>
+  <text x="340" y="220" fill="#E8E4DA" font-size="14" font-weight="bold">frame + decode</text>
+  <text x="340" y="242" fill="#8A877F" font-size="12">startup · Q · P/B/E/S</text>
+
+  <rect x="500" y="190" width="200" height="74" rx="8" fill="#22262C"/>
+  <text x="516" y="220" fill="#E8E4DA" font-size="14" font-weight="bold">decide</text>
+  <text x="516" y="242" fill="#8A877F" font-size="12">cached shape: on loop, 5 µs</text>
+
+  <rect x="500" y="282" width="200" height="74" rx="8" fill="#22262C" stroke="#3A3E46" stroke-dasharray="4 3"/>
+  <text x="516" y="312" fill="#E8E4DA" font-size="14" font-weight="bold">worker (virtual thread)</text>
+  <text x="516" y="334" fill="#8A877F" font-size="12">parse · EXPLAIN · metadata</text>
+
+  <rect x="726" y="190" width="200" height="34" rx="6" fill="#203530"/>
+  <text x="742" y="213" fill="#9ED0C6" font-size="13" font-weight="bold">ALLOW → forward bytes</text>
+  <rect x="726" y="230" width="200" height="34" rx="6" fill="#3A3220"/>
+  <text x="742" y="253" fill="#F0C66A" font-size="13" font-weight="bold">REWRITE → + LIMIT 1000</text>
+  <rect x="726" y="270" width="200" height="34" rx="6" fill="#3D2420"/>
+  <text x="742" y="293" fill="#F08A72" font-size="13" font-weight="bold">BLOCK → Postgres error</text>
+
+  <rect x="324" y="380" width="602" height="56" rx="8" fill="#22262C"/>
+  <text x="340" y="405" fill="#E8E4DA" font-size="14" font-weight="bold">mask results</text>
+  <text x="340" y="425" fill="#8A877F" font-size="12">DataRow rewritten by table OID + column number · email AS e is still masked</text>
+
+  <line x1="474" y1="227" x2="496" y2="227" stroke="#8A877F" stroke-width="2" marker-end="url(#a)"/>
+  <line x1="600" y1="264" x2="600" y2="278" stroke="#8A877F" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#a)"/>
+  <line x1="700" y1="227" x2="722" y2="227" stroke="#8A877F" stroke-width="2" marker-end="url(#a)"/>
+
+  <!-- postgres -->
+  <rect x="1020" y="170" width="200" height="140" rx="10" fill="#1D2026" stroke="#3A3E46"/>
+  <text x="1040" y="202" fill="#E8E4DA" font-size="17" font-weight="bold">PostgreSQL 16</text>
+  <text x="1040" y="230" fill="#B8B4AA" font-size="13">shop: 1M customers,</text>
+  <text x="1040" y="250" fill="#B8B4AA" font-size="13">5M orders</text>
+  <text x="1040" y="282" fill="#8A877F" font-size="12">+ queryguard_config</text>
+
+  <line x1="238" y1="285" x2="296" y2="285" stroke="#4E8C82" stroke-width="3" marker-end="url(#t)"/>
+  <line x1="926" y1="210" x2="1016" y2="210" stroke="#4E8C82" stroke-width="3" marker-end="url(#t)"/>
+  <path d="M1020,290 C990,350 960,400 930,408" fill="none" stroke="#4E8C82" stroke-width="3" marker-end="url(#t)"/>
+  <text x="954" y="200" fill="#8A877F" font-size="12">query</text>
+  <text x="966" y="372" fill="#8A877F" font-size="12">rows</text>
+  <path d="M1080,170 C1080,120 900,110 830,186" fill="none" stroke="#8A877F" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#a)"/>
+  <text x="900" y="112" fill="#8A877F" font-size="12">EXPLAIN · pg_class · pg_attribute</text>
+
+  <!-- admin api / live reload -->
+  <rect x="1020" y="370" width="330" height="120" rx="10" fill="#1D2026" stroke="#E0A526"/>
+  <text x="1040" y="402" fill="#E8E4DA" font-size="17" font-weight="bold">admin API</text>
+  <text x="1150" y="402" fill="#8A877F" font-size="13">Spring Boot · JWT</text>
+  <text x="1040" y="430" fill="#B8B4AA" font-size="13">rules · masking · roles · dry run</text>
+  <text x="1040" y="452" fill="#B8B4AA" font-size="13">versioned, If-Match, audited</text>
+  <text x="1040" y="474" fill="#F0C66A" font-size="12">commit → pg_notify → proxy swaps policy, ~24 ms</text>
+  <path d="M1185,370 C1185,340 1200,320 1200,314" fill="none" stroke="#E0A526" stroke-width="2" marker-end="url(#m)"/>
+  <path d="M1020,440 C990,470 960,470 950,456" fill="none" stroke="#E0A526" stroke-width="2" stroke-dasharray="5 3" marker-end="url(#m)"/>
+  <text x="1236" y="350" fill="#8A877F" font-size="12">config tables</text>
+
+  <!-- analytics -->
+  <text x="48" y="560" fill="#8A877F" font-size="13" letter-spacing="2">EVERY DECISION, AS DATA</text>
+  <path d="M625,460 C625,530 385,520 385,586" fill="none" stroke="#8A877F" stroke-width="2" marker-end="url(#a)"/>
+  <text x="560" y="522" fill="#8A877F" font-size="12">bounded queue, never blocks a query</text>
+  <text x="560" y="538" fill="#8A877F" font-size="12">normalized SQL only, never values</text>
+
+  <rect x="300" y="590" width="170" height="110" rx="10" fill="#1D2026" stroke="#3A3E46"/>
+  <text x="320" y="622" fill="#E8E4DA" font-size="16" font-weight="bold">Kafka</text>
+  <text x="320" y="648" fill="#B8B4AA" font-size="13">KRaft</text>
+  <text x="320" y="668" fill="#8A877F" font-size="12">qg.query-events</text>
+
+  <rect x="530" y="590" width="300" height="110" rx="10" fill="#1D2026" stroke="#3A3E46"/>
+  <text x="550" y="622" fill="#E8E4DA" font-size="16" font-weight="bold">ClickHouse</text>
+  <text x="550" y="648" fill="#B8B4AA" font-size="13">Kafka engine → MergeTree (90 d)</text>
+  <text x="550" y="668" fill="#B8B4AA" font-size="13">hourly + per-shape rollups</text>
+  <text x="550" y="688" fill="#8A877F" font-size="12">3.6M+ events</text>
+
+  <rect x="890" y="590" width="200" height="110" rx="10" fill="#1D2026" stroke="#3A3E46"/>
+  <text x="910" y="622" fill="#E8E4DA" font-size="16" font-weight="bold">dbt</text>
+  <text x="910" y="648" fill="#B8B4AA" font-size="13">marts + 19 tests</text>
+  <text x="910" y="668" fill="#8A877F" font-size="12">incl. "no literals logged"</text>
+
+  <rect x="1150" y="590" width="200" height="110" rx="10" fill="#1D2026" stroke="#3A3E46"/>
+  <text x="1170" y="622" fill="#E8E4DA" font-size="16" font-weight="bold">Grafana</text>
+  <text x="1170" y="648" fill="#B8B4AA" font-size="13">query analytics</text>
+  <text x="1170" y="668" fill="#B8B4AA" font-size="13">proxy health</text>
+  <text x="1170" y="688" fill="#8A877F" font-size="12">+ Prometheus</text>
+
+  <line x1="470" y1="645" x2="526" y2="645" stroke="#8A877F" stroke-width="2" marker-end="url(#a)"/>
+  <line x1="830" y1="645" x2="886" y2="645" stroke="#8A877F" stroke-width="2" marker-end="url(#a)"/>
+  <line x1="1090" y1="645" x2="1146" y2="645" stroke="#8A877F" stroke-width="2" marker-end="url(#a)"/>
+  <path d="M830,615 C1000,560 1100,560 1200,586" fill="none" stroke="#8A877F" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#a)"/>
+</svg>

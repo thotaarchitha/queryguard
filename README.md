@@ -1,6 +1,7 @@
 # QueryGuard
 
 ![CI](https://github.com/thotaarchitha/queryguard/actions/workflows/ci.yml/badge.svg)
+![Core coverage](docs/coverage.svg)
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)
 
 **A PostgreSQL proxy that reads every query before your database does.**
@@ -10,24 +11,12 @@ or refuse it with a real Postgres error. It masks columns like `email` and `card
 asking, and streams every decision through Kafka into ClickHouse. psql, JDBC, psycopg and DBeaver
 all work unchanged; they just connect to a different port.
 
-```
-$ psql "postgresql://bob@localhost:6432/shop" -c "DELETE FROM orders"
-ERROR:  QueryGuard R1: DELETE without a WHERE clause would touch every row.
-DETAIL:  rule R1
+![Demo: a blocked DELETE, masked columns, a refused unmasking attempt and an expensive query refused](docs/demo.gif)
 
-$ psql "postgresql://alice@localhost:6432/shop" -c "SELECT id, email AS e, phone, card_last4 FROM customers WHERE id IN (7, 42)"
- id |      e       |    phone    | card_last4
-----+--------------+-------------+------------
-  7 | u***@***.com | *******0107 | ****
- 42 | u***@***.com | *******0142 | ****
-
-$ psql "postgresql://alice@localhost:6432/shop" -c "SELECT customer_id, sum(total_cents) FROM orders GROUP BY 1 ORDER BY 2 DESC"
-ERROR:  QueryGuard R3: estimated cost 373410 is over the 100000 limit for analysts. Add filters or a LIMIT.
-DETAIL:  rule R3, estimated cost 373410, estimated rows 5
-```
-
-That's real output. alice is an analyst, so her email column is masked even though she renamed it,
-and her expensive query was costed with EXPLAIN and refused before Postgres ran it.
+That's a real recording against the compose stack (`docs/demo/demo.tape`, made with VHS; nothing edited).
+bob's DELETE never reaches Postgres. alice is an analyst, so her email column is masked even though she
+renamed it, wrapping it in `upper()` is refused, and her expensive query is priced with EXPLAIN and
+refused before Postgres runs it.
 
 ![Query analytics dashboard](docs/grafana-query-analytics.jpg)
 
@@ -98,16 +87,11 @@ ClickHouse (MergeTree + hourly and per-shape rollups) → Grafana, plus dbt mart
 
 ## How a query gets through
 
-```
-client ─► frame + decode ─► shape cached? ─yes─► rules on the event loop (~5 µs) ─┐
-                │                  └─no──► virtual thread: parse once, EXPLAIN    ─┤
-                │                                                                   ├─► forward / rewrite /
-                │                                                                   │   block (Postgres rejects a
-                │                                                                   │   placeholder; error swapped)
-results ◄── mask DataRow by table OID + column # ◄──────────────── Postgres ◄──────┘
-   │
-   └─► event ─► bounded queue ─► Kafka ─► ClickHouse ─► Grafana / dbt
-```
+![Architecture](docs/architecture.png)
+
+Blocked queries aren't answered by the proxy. It sends Postgres a placeholder that fails to parse and
+swaps Postgres' error for its own on the way back, so Postgres handles all the protocol state
+(aborted transactions, the rest of an extended-protocol batch). Source: `docs/architecture.svg`.
 
 ## Numbers
 
@@ -167,8 +151,10 @@ make k8s-up                  # kind cluster + Helm chart + smoke test (needs kin
 
 No local Java? Prefix with `docker run --rm -v "$PWD:/src" -w /src gradle:8.10.2-jdk21`.
 
-Tests: 108 in total: 82 unit tests for the rule engine and proxy, 12 proxy integration tests with real
-Postgres and pgjdbc traffic, 14 for the admin API (6 of them against a real database), plus 19 dbt checks.
+Tests: 110 in total: 82 unit tests for the rule engine and proxy, 14 proxy integration tests with real
+Postgres (pgjdbc traffic plus live reload over LISTEN/NOTIFY), 14 for the admin API (6 against a real
+database), plus 19 dbt checks. Line coverage is 87.7% on the decision path (analysis, rules, masking,
+protocol) and 79.6% overall, unit and integration combined; `python bench/coverage.py` prints it per package.
 CI runs all of them, lints the chart and Dockerfiles, pushes every demo query through the compose stack,
 and publishes images to GHCR.
 
