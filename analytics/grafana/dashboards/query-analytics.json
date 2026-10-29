@@ -12,7 +12,7 @@
   "graphTooltip": 1,
   "refresh": "10s",
   "time": {
-    "from": "now-1h",
+    "from": "now-24h",
     "to": "now"
   },
   "panels": [
@@ -54,7 +54,8 @@
               "group": "A"
             },
             "barAlignment": 0
-          }
+          },
+          "displayName": "${__field.labels.decision}"
         },
         "overrides": [
           {
@@ -325,7 +326,7 @@
     {
       "id": 6,
       "type": "barchart",
-      "title": "Which rules fired",
+      "title": "What got blocked, by rule",
       "gridPos": {
         "x": 0,
         "y": 11,
@@ -339,7 +340,7 @@
             "uid": "clickhouse"
           },
           "editorType": "sql",
-          "rawSql": "SELECT ifNull(rule_id, '?') AS rule, count() AS fired\n        FROM qg.query_events\n        WHERE $__timeFilter(ts) AND decision != 'ALLOW'\n        GROUP BY rule ORDER BY fired DESC",
+          "rawSql": "SELECT ifNull(rule_id, '?') AS rule, count() AS blocked\n        FROM qg.query_events\n        WHERE $__timeFilter(ts) AND decision = 'BLOCK'\n        GROUP BY rule ORDER BY blocked DESC",
           "format": 1,
           "queryType": "table",
           "refId": "A"
@@ -386,7 +387,7 @@
             "uid": "clickhouse"
           },
           "editorType": "sql",
-          "rawSql": "SELECT any(sql_normalized)                              AS query,\n               any(statement_type)                              AS kind,\n               countMerge(executions)                           AS runs,\n               countIfMerge(blocked)                            AS blocked,\n               round(max(cost_max))                             AS max_cost,\n               round(avgMerge(query_ms_avg), 1)                 AS avg_ms,\n               arrayStringConcat(groupUniqArrayMerge(roles), ' ') AS roles\n        FROM qg.top_fingerprints_daily\n        WHERE day >= today() - 7\n        GROUP BY fingerprint\n        ORDER BY max_cost DESC\n        LIMIT 15",
+          "rawSql": "SELECT any(sql_normalized)                              AS query,\n               anyIf(statement_type, statement_type != 'OTHER') AS kind,\n               countMerge(executions)                           AS runs,\n               countIfMerge(blocked)                            AS blocked,\n               round(max(cost_max))                             AS max_cost,\n               round(avgMerge(query_ms_avg), 1)                 AS avg_ms,\n               arrayStringConcat(groupUniqArrayMerge(roles), ' ') AS roles\n        FROM qg.top_fingerprints_daily\n        WHERE day >= today() - 7\n        GROUP BY fingerprint\n        ORDER BY max_cost DESC\n        LIMIT 15",
           "format": 1,
           "queryType": "table",
           "refId": "A"

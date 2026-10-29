@@ -108,6 +108,51 @@ only parsed again, from the query's own text, when a REWRITE actually needs it. 
 
 ---
 
+### 2026-10-29: analyst queries didn't get faster with the cache
+
+**Symptom.** JMH after the shape cache: point lookups went from 776 us to 5 us, but the analyst join
+stayed at 2.4 ms.
+
+**Cause.** Analyst queries without a LIMIT get one added by R4, and the rewrite re-parsed the full AST to
+call `setLimit()` and re-serialize it. Every analyst query paid for a full JSqlParser run anyway.
+
+**Fix.** Append ` LIMIT n` to the statement's own text when the cached facts say it has no LIMIT/FETCH
+and no locking clause. 2.4 ms became 16 us, and the client's SQL is no longer reformatted.
+
+**Lesson.** Benchmark per query type, not on average. The average looked great.
+
+---
+
+### 2026-10-29: the admin API got slower when I made it "faster"
+
+The rule list endpoint parsed every rule's JSON on every request: 761 req/s and p95 571 ms at 200
+users. Caching it by `config_version` was a clear win (1,936 req/s). Then I also turned on Spring's
+virtual threads, expecting more, and got 562 req/s with p95 over a second. With platform threads,
+Tomcat's pool paced requests; with virtual threads, all 200 hit the 20-connection DB pool and the shared CPU
+at once. Reverted. Also: my first k6 script had zero think time, so its "p95 latency" was just
+200 users divided by throughput. Realistic pacing (0.5-1.5 s per user) gives p95 10-16 ms.
+
+---
+
+### 2026-10-29: pgbench's VACUUM was refused as an "unparseable write"
+
+pgbench vacuums its tables before every run. JSqlParser can't read `VACUUM`, my keyword table called it
+ALTER, and the parse-error policy refuses unparsed writes, so the dashboards showed QG-PARSE blocks
+for bob. VACUUM/ANALYZE/REINDEX/CLUSTER/CHECKPOINT now have their own MAINTENANCE kind, which is fine
+to let through unparsed. Found by reading the "what got blocked" panel, not by a test.
+
+---
+
+### 2026-10-29: duplicate query events
+
+dbt's `unique(event_id)` test failed on the first run over ~470K events: 3,275 duplicates, all
+byte-identical, arriving in bursts. ClickHouse's Kafka consumer redelivers batches after rebalances, which
+happened a lot while the laptop was overloaded. At-least-once is the deal with the Kafka engine,
+so the raw table became a ReplacingMergeTree on `event_id` and dbt reads it with FINAL. The streaming
+rollups still count at insert time; that's documented as approximate.
+
+---
+
 ### 2026-10-28: smaller ones
 
 - **Testcontainers vs Docker Engine 29.** Every container test failed with an empty `Status 400`.
@@ -119,5 +164,8 @@ only parsed again, from the query's own text, when a REWRITE actually needs it. 
   result XML was missing. A green build with no tests is the worst kind.
 - **Parallel `docker compose build` broke Gradle.** Both images used the same BuildKit cache mount
   for `~/.gradle` and fought over its lock files. `sharing=locked` makes them take turns.
+- **An empty answer looked like "not loaded".** Databases with no masked tables resolved to an empty
+  map, and `isEmpty()` was also how I checked "not loaded yet", so every query took an extra async hop
+  to "load" again. Now there's a separate loaded flag.
 - **ClickHouse "unhealthy" while working fine.** The healthcheck ran an anonymous query, and with a
   password set that's refused. `/ping` needs no auth.

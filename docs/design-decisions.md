@@ -93,7 +93,7 @@ in **one transaction**. Postgres holds notifications until COMMIT, so a proxy ca
 it can't see yet, and a rolled-back change never notifies anyone. Each proxy keeps one connection on
 `LISTEN qg_rules_changed`, reloads everything in one REPEATABLE READ snapshot, builds a new immutable
 policy, and swaps an `AtomicReference`. A query grabs the reference once, at the start of its decision, so
-it finishes on the policy it started with. Measured: about 70 ms from commit to live (RESULTS.md).
+it finishes on the policy it started with. Measured: 24 ms median from commit to live, 170 ms worst (bench/RESULTS.md).
 Missed notifications (proxy disconnected) are handled by a full reload on reconnect.
 
 ## 7. Scaling to 50K connections: what breaks first?
@@ -172,7 +172,14 @@ think about fail-open: it's only safe if what it lets through can't make the fai
   Postgres first and the transaction-state edge cases were endless. Cost: one cheap round trip per
   blocked query, and a syntax error line in the Postgres log (which turns out to be a nice audit trail).
 - **Parse once per query shape.** Rule facts depend only on the normalized text, so they're cached by it.
-  The AST is re-parsed from the real text only for rewrites.
+  5 us per decision instead of ~800 us (JMH).
+- **The LIMIT rewrite appends text instead of rewriting the AST.** If the cached facts say there's no
+  LIMIT/FETCH and no locking clause, ` LIMIT n` after the statement's own text is valid Postgres after
+  anything a SELECT can end with. It took analyst queries from 2.4 ms to 16 us and keeps the client's SQL
+  byte for byte.
+- **Cheap decisions run on the event loop.** A known shape with everything cached is decided in place
+  (a few microseconds of CPU). Anything that could block (first parse, EXPLAIN, metadata) still goes to
+  a virtual thread. "Don't block the event loop" is about blocking, not about doing any work there.
 - **Rules in `common`.** The proxy and the admin API's dry run use the same engine, so `/rules/test`
   can't disagree with what the proxy does.
 - **If-Match for rule edits.** Optimistic locking through HTTP's own ETag/If-Match. A stale edit is a 409,

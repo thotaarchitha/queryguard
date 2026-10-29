@@ -1,146 +1,179 @@
 # QueryGuard
 
 ![CI](https://github.com/thotaarchitha/queryguard/actions/workflows/ci.yml/badge.svg)
+![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)
 
 **A PostgreSQL proxy that reads every query before your database does.**
 
-It sits on port 6432, speaks the Postgres wire protocol, and decides per query: let it through,
-rewrite it, or refuse it with a real Postgres error. Later it also masks columns like `email` and
-`card_last4` depending on who's asking, and streams every decision into ClickHouse so you can
-see who's running what.
-
-No client changes. psql, JDBC, psycopg and DBeaver all just connect to a different port.
+It speaks the Postgres wire protocol on port 6432 and decides per query: let it through, rewrite it,
+or refuse it with a real Postgres error. It masks columns like `email` and `card_last4` depending on who's
+asking, and streams every decision through Kafka into ClickHouse. psql, JDBC, psycopg and DBeaver
+all work unchanged; they just connect to a different port.
 
 ```
-$ psql -h localhost -p 6432 -U alice -d shop
-shop=> DELETE FROM orders;
+$ psql "postgresql://bob@localhost:6432/shop" -c "DELETE FROM orders"
 ERROR:  QueryGuard R1: DELETE without a WHERE clause would touch every row.
+DETAIL:  rule R1
+
+$ psql "postgresql://alice@localhost:6432/shop" -c "SELECT id, email AS e, phone, card_last4 FROM customers WHERE id IN (7, 42)"
+ id |      e       |    phone    | card_last4
+----+--------------+-------------+------------
+  7 | u***@***.com | *******0107 | ****
+ 42 | u***@***.com | *******0142 | ****
+
+$ psql "postgresql://alice@localhost:6432/shop" -c "SELECT customer_id, sum(total_cents) FROM orders GROUP BY 1 ORDER BY 2 DESC"
+ERROR:  QueryGuard R3: estimated cost 373410 is over the 100000 limit for analysts. Add filters or a LIMIT.
+DETAIL:  rule R3, estimated cost 373410, estimated rows 5
 ```
 
-↑ That's the goal. **It doesn't do that yet.** Right now it's a fast, boring TCP pipe (Phase 1 of 9).
-I'm building it in public, one phase at a time; the log is at the bottom.
+That's real output. alice is an analyst, so her email column is masked even though she renamed it,
+and her expensive query was costed with EXPLAIN and refused before Postgres ran it.
+
+![Query analytics dashboard](docs/grafana-query-analytics.jpg)
 
 ---
 
 ## Why build this
 
-Most database incidents I've seen up close weren't clever. Someone forgot a `WHERE`. Someone ran
-`SELECT *` on the biggest table in the warehouse at 9am. A dashboard query quietly went from 200 ms
-to 40 s and nobody noticed until the database did.
+Most database incidents I've seen up close weren't clever. Someone forgot a `WHERE`. Someone ran `SELECT *`
+on the biggest table at 9am. A dashboard query quietly went from 200 ms to 40 s.
 
-Database permissions answer *"can this user touch this table?"* They don't answer *"is this query
-a bad idea?"* That needs something that can read the SQL, ask Postgres what it'll cost, and say no
-before the database pays for it. That's the gap QueryGuard sits in.
+Database permissions answer *"can this user touch this table?"* They don't answer *"is this query a bad
+idea?"* or *"should this person see raw emails?"* That needs something that reads the SQL, asks Postgres
+what it'll cost, and says no before the database pays for it. It should also keep a record you can actually query.
 
-It is **not** a pooler. PgBouncer is great at pooling and deliberately doesn't look inside your
-queries. QueryGuard does the opposite.
+It is **not** a pooler. PgBouncer pools connections and deliberately ignores your SQL. QueryGuard reads it.
+They stack fine: client → QueryGuard → PgBouncer → Postgres.
 
 ## Run it
 
 You need Docker. That's it, no local Java.
 
 ```bash
-git clone https://github.com/thotaarchitha/queryguard.git
-cd queryguard
-docker compose up -d --build --wait
+git clone https://github.com/thotaarchitha/queryguard.git && cd queryguard
+docker compose up -d --build --wait          # ~3 min first time: builds, seeds 6M rows
+docker compose --profile traffic up -d       # optional: fake users generating traffic
 ```
 
-The first start seeds a fake shop: 1M customers, 5M orders, 10K products, about 30 s on my laptop.
-Everything in it is generated with `generate_series`. Emails are `@example.com` and phones are in the
-555-01xx fiction range, so none of it can belong to a real person.
+| | |
+|---|---|
+| Proxy (point psql here) | `localhost:6432`, users `alice` `bob` `etl_user` `report_ro`, password = username |
+| Admin API + Swagger | http://localhost:8080/swagger-ui.html (`admin` / `admin-dev`) |
+| Grafana | http://localhost:3000 (no login needed to view) |
+| Every rule, demoed | `make demo`, or run `infra/demo/rules.sql` through psql |
 
-```bash
-psql -h localhost -p 6432 -U postgres -d shop     # password: dev
-```
+The shop data is generated with `generate_series`: 1M customers, 5M orders. Emails are `@example.com` and
+phones are in the 555-01xx fiction range, so none of it can be a real person.
 
-## What's actually built
+## What it does
 
-**Phase 1: pass-through proxy.** Java 21 + Netty.
+**Rules**, from [`infra/rules/default-rules.yml`](infra/rules/default-rules.yml) or the admin API:
 
-- Each client connection gets its own backend connection, created on the **same event loop**, so one
-  thread owns both ends. No locks, no handoffs between threads.
-- **Backpressure both ways.** Auto-read is off, and a side only reads more when the other side can
-  take it. A slow client pulling a 5M-row result doesn't turn into 5M rows sitting in proxy memory.
-- If Postgres dies mid-query the client gets disconnected right away instead of hanging. The backend
-  connect gives up after 3 s.
-- SCRAM auth passes straight through. I don't touch the handshake (yet).
-
-Four tests run against an echo server pretending to be Postgres: round trip, an 8 MB payload
-(big enough to actually hit the backpressure path), backend down at connect, and backend dying
-mid-session.
-
-## Numbers, with caveats
-
-pgbench, select-only, 20 clients, median of 3 runs:
-
-|                  | TPS    | avg latency |
-|------------------|--------|-------------|
-| straight to PG   | 34,568 | 0.58 ms     |
-| through QueryGuard | 21,591 | 0.93 ms   |
-
-So about **+0.35 ms per query**. The −37% TPS looks worse than it is, and I don't fully trust it yet:
-
-- pgbench, Postgres and the proxy were all fighting over the same 12 laptop threads in Docker Desktop.
-- `-S` queries take half a millisecond, so any extra network hop is a big *percentage*. On a 50 ms
-  analytics query the same 0.35 ms is under 1%.
-- One of the direct runs came in at 14.6K TPS for no reason I could find. Laptop noise.
-
-I'll rerun this on a dedicated Linux box before these numbers go anywhere serious.
-Raw runs: [`bench/pgbench/results/phase1.md`](bench/pgbench/results/phase1.md).
-
-## How a query will get through (the plan)
-
-```
-client ──► decode wire msg ──► parse SQL ──► EXPLAIN (cached) ──► rules ──┬─► forward
-                                                                          ├─► rewrite + forward
-                                                                          └─► ErrorResponse, never reaches PG
-results ◄── mask DataRow by table OID + column # ◄── Postgres
-                    │
-                    └─► every decision ─► Kafka ─► ClickHouse ─► Grafana
-```
-
-A few of these choices are deliberate and I'll defend them in [`docs/design-decisions.md`](docs/design-decisions.md):
-
-- **Mask by table OID + column number, not by column name.** `SELECT email AS e` shouldn't
-  get around masking just by renaming the column.
-- **Parsing and EXPLAIN go off the event loop** onto virtual threads. A slow EXPLAIN shouldn't stall
-  every other connection sharing that thread.
-- **Logging never blocks a query.** If Kafka is down, events get dropped and counted. Queries keep working.
-- **Only normalized SQL gets logged** (`where id = ?`), never the literal values.
-
-The eight starting rules are already written down in
-[`infra/rules/default-rules.yml`](infra/rules/default-rules.yml), even though nothing reads that file yet.
-
-## Build log
-
-| | phase | status |
+| | Rule | Applies to |
 |---|---|---|
-| 1 | TCP pass-through, backpressure, pgbench baseline | **done** |
-| 2 | Wire protocol: decode startup / Q / P / B / E, sessions, send our own errors | next |
-| 3 | Rule engine: JSqlParser, fingerprints, EXPLAIN + Caffeine cache | |
-| 4 | Column masking, circuit breaker, metrics | |
-| 5 | Spring Boot admin API, live reload over LISTEN/NOTIFY | |
-| 6 | Kafka → ClickHouse (MergeTree + hourly rollups, dbt) → Grafana | |
-| 7 | Testcontainers suite, JMH, k6, honest benchmark write-up | |
-| 8 | Helm on kind, CI image publishing | |
+| R1 | UPDATE/DELETE with no WHERE: block | everyone |
+| R2 | DROP/TRUNCATE: block | everyone but admin |
+| R3 | EXPLAIN cost over 100,000: block | analysts |
+| R4 | SELECT with no LIMIT: rewrite with `LIMIT 1000` | analysts |
+| R5 | `SELECT *` over 1M estimated rows: block | everyone but etl/admin |
+| R6 | Cross join or a join with no condition: block | everyone |
+| R7 | Writes outside the Sat/Sun 02:00-04:00 UTC window: block | read-only apps |
+| R8 | `pg_sleep`, `pg_read_file`, `dblink`...: block | everyone |
 
-Known gaps I'm choosing to live with for now: no TLS termination (from Phase 2 the proxy will answer
-`N` to SSLRequest), no pooling, single backend. Things that broke along the way are in
-[`docs/bug-journal.md`](docs/bug-journal.md).
+Multi-statement queries are checked statement by statement (`SELECT 1; DROP TABLE x` is blocked).
+`EXPLAIN ANALYZE DELETE` counts as a DELETE, and comments can't fake a WHERE clause.
 
-## Hacking on it
+**Masking by column identity, not name.** Every result column in Postgres' RowDescription carries its
+source table OID and column number. QueryGuard maps those to `customers.email` and rewrites DataRows on
+the way back. `SELECT email AS e` is still masked. The ways to dodge that (`upper(email)`,
+`WHERE email LIKE 'a%'`, `ORDER BY email`, `row_to_json(c)`, UNION, subqueries, COPY) are refused up front
+for roles that have the column masked. There's a test for each one.
 
-```bash
-./gradlew build                     # with JDK 21
-# or, no Java installed:
-docker run --rm -v "$PWD:/src" -w /src gradle:8.10.2-jdk21 ./gradlew build
+**Live policy.** `PUT /rules/R3` through the JWT-secured admin API, and the proxy has the new rule
+about 24 ms later, with no restart. Edits use ETag/If-Match, so two admins can't silently overwrite each other.
+Every change is versioned and audited. `POST /rules/test` dry-runs a query against the live policy.
+
+**Analytics.** Every decision becomes an event (normalized SQL only, never values) → Kafka →
+ClickHouse (MergeTree + hourly and per-shape rollups) → Grafana, plus dbt marts with tests.
+
+## How a query gets through
+
+```
+client ─► frame + decode ─► shape cached? ─yes─► rules on the event loop (~5 µs) ─┐
+                │                  └─no──► virtual thread: parse once, EXPLAIN    ─┤
+                │                                                                   ├─► forward / rewrite /
+                │                                                                   │   block (Postgres rejects a
+                │                                                                   │   placeholder; error swapped)
+results ◄── mask DataRow by table OID + column # ◄──────────────── Postgres ◄──────┘
+   │
+   └─► event ─► bounded queue ─► Kafka ─► ClickHouse ─► Grafana / dbt
 ```
 
-Config is four env vars: `QG_LISTEN_PORT` (6432), `QG_PG_HOST` (localhost), `QG_PG_PORT` (5432),
-`QG_CONNECT_TIMEOUT_MS` (3000).
+## Numbers
+
+Measured on one laptop with everything running at once. Full write-up, methods and caveats in
+[`bench/RESULTS.md`](bench/RESULTS.md).
+
+| | |
+|---|---|
+| Decision step, known query shape (JMH) | **5 µs** p50 (vs ~800 µs parsing every query) |
+| Rule change → live in the proxy | **24 ms** median |
+| Admin API, 200 users with realistic pacing | p95 **10-16 ms**, 0 errors; max **1,936 req/s** |
+| Query events in ClickHouse | **3.6M+**, 0 dropped; 130K events/s catch-up after an outage |
+| pgbench through the proxy (prepared, 32 clients) | 9.4K TPS vs 25K direct, on shared CPUs (see caveats) |
+
+The throughput overhead is the weak number. On a laptop where pgbench, Postgres, Kafka, ClickHouse and
+the proxy share 12 threads, the proxy's ~0.7 ms of CPU per query comes straight out of Postgres' budget.
+RESULTS.md breaks down where that CPU goes.
+
+## The interesting parts
+
+- **[docs/design-decisions.md](docs/design-decisions.md)**: the trade-offs, written as answers to the
+  twelve questions I'd expect in an interview (fail-open vs fail-closed, why ClickHouse, scaling to 50K connections...).
+- **[docs/bug-journal.md](docs/bug-journal.md)**: what broke. The best one: under load, EXPLAIN timed out,
+  the cost rules failed open, and the expensive queries they exist to stop made the overload worse.
+- **[docs/protocol-notes.md](docs/protocol-notes.md)**: real bytes of a Postgres startup, captured through the proxy.
+
+## Limitations
+
+- **No TLS termination.** The proxy answers `N` to SSLRequest. Clients that require TLS won't connect.
+- **No pooling.** Client connections map 1:1 to Postgres connections. Auth passes through untouched,
+  so the proxy never has credentials to pool with.
+- **Binary-format masked columns come back NULL** rather than masked text.
+- **Masking doesn't see through views or SECURITY DEFINER functions** owned by someone else; those need their own policy.
+- **Blocking in the middle of an extended-protocol batch** relies on Postgres' own error handling. Earlier
+  statements in the same implicit transaction are rolled back, exactly as with any other error.
+- **JSqlParser doesn't know all of Postgres.** Unparseable reads are allowed and unparseable writes refused;
+  `libpg_query` would be the real fix.
+
+## Project layout
+
+```
+proxy/        Netty proxy: protocol, decisions, masking, events, metrics
+admin-api/    Spring Boot: rules, masking, roles, dry run, stats; Flyway schema
+common/       rule engine, SQL analysis, masking guard (shared so dry runs can't disagree with the proxy)
+analytics/    ClickHouse DDL, dbt project, Grafana dashboards (generated by a script), Prometheus
+bench/        pgbench, JMH, k6, traffic generator, connection test, RESULTS.md
+infra/        seed data, rules, demo script, Helm chart
+```
+
+## Development
+
+```bash
+./gradlew build              # unit tests
+./gradlew integrationTest    # Testcontainers: real Postgres 16 and real pgjdbc traffic
+make k8s-up                  # kind cluster + Helm chart + smoke test (needs kind, kubectl, helm)
+```
+
+No local Java? Prefix with `docker run --rm -v "$PWD:/src" -w /src gradle:8.10.2-jdk21`.
+
+Tests: 108 in total: 82 unit tests for the rule engine and proxy, 12 proxy integration tests with real
+Postgres and pgjdbc traffic, 14 for the admin API (6 of them against a real database), plus 19 dbt checks.
+CI runs all of them, lints the chart and Dockerfiles, pushes every demo query through the compose stack,
+and publishes images to GHCR.
 
 ---
 
 Built by **Architha Reddy Thota**. I'm a master's student, and before that I spent three years as a
-software engineer on backend systems, with a fair amount of data work along the way. This project is
-where those two halves meet. MIT licensed.
+software engineer on backend systems, with a fair amount of data work along the way. This is where
+those two halves meet. MIT licensed.

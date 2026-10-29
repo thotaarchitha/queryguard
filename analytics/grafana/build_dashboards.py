@@ -71,9 +71,13 @@ def dashboard(uid, title, panels, refresh="10s", time_from="now-1h", tags=()):
             "panels": panels, "templating": {"list": []}, "annotations": {"list": []}}
 
 
-def stacked_bars(p):
+def stacked_bars(p, label=None):
     p["fieldConfig"]["defaults"]["custom"] = {"drawStyle": "bars", "fillOpacity": 85, "lineWidth": 0,
                                               "stacking": {"mode": "normal", "group": "A"}, "barAlignment": 0}
+    if label:
+        # long-format SQL results come back as "queries ALLOW"; name series by the label so the
+        # color overrides (and the legend) just say ALLOW / REWRITE / BLOCK
+        p["fieldConfig"]["defaults"]["displayName"] = "${__field.labels.%s}" % label
     p["fieldConfig"]["overrides"] = color_overrides(DECISION_COLORS)
     p["options"] = {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": True},
                     "tooltip": {"mode": "multi", "sort": "desc"}}
@@ -101,7 +105,7 @@ analytics = [
         WHERE $__timeFilter(ts)
         GROUP BY time, decision
         ORDER BY time
-    """, "timeseries")], desc="One bar per interval, stacked. ALLOW is most of it; watch the red.")),
+    """, "timeseries")], desc="One bar per interval, stacked. ALLOW is most of it; watch the red."), label="decision"),
     big_stat(panel("stat", "Blocked", 17, 0, 7, 4, [ch_target("""
         SELECT countIf(decision = 'BLOCK') AS blocked FROM qg.query_events WHERE $__timeFilter(ts)
     """)]), BLOCK),
@@ -115,18 +119,18 @@ analytics = [
         SELECT count() FROM qg.query_events
     """)]), MUTED),
 
-    panel("barchart", "Which rules fired", 0, 11, 8, 11, [ch_target("""
-        SELECT ifNull(rule_id, '?') AS rule, count() AS fired
+    panel("barchart", "What got blocked, by rule", 0, 11, 8, 11, [ch_target("""
+        SELECT ifNull(rule_id, '?') AS rule, count() AS blocked
         FROM qg.query_events
-        WHERE $__timeFilter(ts) AND decision != 'ALLOW'
-        GROUP BY rule ORDER BY fired DESC
+        WHERE $__timeFilter(ts) AND decision = 'BLOCK'
+        GROUP BY rule ORDER BY blocked DESC
     """)], desc="R = rule from the policy, M1 = masking guard, QG-* = fail-safe decisions (parse/cost/timeout).",
           options={"orientation": "horizontal", "showValue": "always", "legend": {"showLegend": False},
                    "xTickLabelRotation": 0, "barWidth": 0.7},
           fieldConfig={"defaults": {"color": {"mode": "fixed", "fixedColor": BLOCK}}, "overrides": []}),
     panel("table", "Most expensive query shapes, last 7 days", 8, 11, 16, 11, [ch_target("""
         SELECT any(sql_normalized)                              AS query,
-               any(statement_type)                              AS kind,
+               anyIf(statement_type, statement_type != 'OTHER') AS kind,
                countMerge(executions)                           AS runs,
                countIfMerge(blocked)                            AS blocked,
                round(max(cost_max))                             AS max_cost,
@@ -231,7 +235,7 @@ health = [
 
 OUT.mkdir(exist_ok=True)
 (OUT / "query-analytics.json").write_text(json.dumps(
-    dashboard("qg-analytics", "QueryGuard / what happened to every query", analytics, tags=["clickhouse"]), indent=2))
+    dashboard("qg-analytics", "QueryGuard / what happened to every query", analytics, time_from="now-24h", tags=["clickhouse"]), indent=2))
 (OUT / "proxy-health.json").write_text(json.dumps(
     dashboard("qg-health", "QueryGuard / proxy health", health, refresh="5s", time_from="now-30m", tags=["prometheus"]), indent=2))
 print("wrote", *sorted(p.name for p in OUT.glob("*.json")))
