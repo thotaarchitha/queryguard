@@ -22,7 +22,7 @@ spec:
     spec:
       # Longer than the proxy's own drain (QG_SHUTDOWN_GRACE_S) so Kubernetes doesn't SIGKILL mid-drain.
       terminationGracePeriodSeconds: {{ add .Values.proxy.shutdownGraceSeconds 15 }}
-      securityContext: { runAsNonRoot: true, runAsUser: 100, fsGroup: 101 }
+      securityContext: { runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, fsGroup: 10001 }
       containers:
         - name: proxy
           image: "{{ .Values.image.registry }}/queryguard-proxy:{{ .Values.image.tag }}"

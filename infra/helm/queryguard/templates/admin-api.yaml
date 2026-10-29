@@ -15,7 +15,7 @@ spec:
       annotations:
         checksum/rules: {{ include (print $.Template.BasePath "/config.yaml") . | sha256sum }}
     spec:
-      securityContext: { runAsNonRoot: true, runAsUser: 100, fsGroup: 101 }
+      securityContext: { runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, fsGroup: 10001 }
       containers:
         - name: admin-api
           image: "{{ .Values.image.registry }}/queryguard-admin-api:{{ .Values.image.tag }}"
