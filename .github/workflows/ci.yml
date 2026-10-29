@@ -22,7 +22,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: Unit tests
         run: ./gradlew build
-      - name: Integration tests (Testcontainers: Postgres 16)
+      - name: "Integration tests (Testcontainers, Postgres 16)"
         run: ./gradlew integrationTest
       - name: Coverage report
         run: ./gradlew jacocoTestReport
