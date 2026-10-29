@@ -10,7 +10,7 @@ spring:
     username: ${QG_CONFIG_DB_USER:qg_config}
     password: ${QG_CONFIG_DB_PASSWORD:qg_config}
     hikari:
-      maximum-pool-size: 10
+      maximum-pool-size: 20
   jackson:
     property-naming-strategy: SNAKE_CASE
     default-property-inclusion: non_null

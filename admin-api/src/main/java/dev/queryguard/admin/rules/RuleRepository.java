@@ -27,7 +27,28 @@ public class RuleRepository {
         this.mapper = mapper;
     }
 
+    private record Snapshot(long version, List<RuleRow> rows) {
+    }
+
+    private volatile Snapshot snapshot = new Snapshot(-1, List.of());
+
+    /**
+     * Rules are read thousands of times for every write, so the parsed list is cached and keyed
+     * by config_version. Every write bumps that version in the same transaction, so a stale list
+     * can't be served; the check is one single-row read instead of parsing every rule's JSON.
+     */
     public List<RuleRow> findAll() {
+        long v = jdbc.sql("SELECT version FROM config_version").query(Long.class).single();
+        Snapshot s = snapshot;
+        if (s.version() == v) {
+            return s.rows();
+        }
+        List<RuleRow> rows = List.copyOf(loadAll());
+        snapshot = new Snapshot(v, rows);
+        return rows;
+    }
+
+    private List<RuleRow> loadAll() {
         return jdbc.sql("SELECT id, version, enabled, body::text, created_by, created_at, updated_by, updated_at FROM rules ORDER BY (body->>'priority')::int NULLS LAST, id")
                 .query((rs, i) -> new RuleRow(rs.getString(1), rs.getInt(2), rs.getBoolean(3), json(rs.getString(4)),
                         rs.getString(5), rs.getObject(6, OffsetDateTime.class), rs.getString(7), rs.getObject(8, OffsetDateTime.class)))
