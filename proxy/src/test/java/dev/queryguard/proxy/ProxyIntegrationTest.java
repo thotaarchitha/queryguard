@@ -42,7 +42,9 @@ class ProxyIntegrationTest {
         // Same policy as production, with the cost thresholds scaled down to the tiny test tables.
         String rules = Files.readString(Path.of("../infra/rules/default-rules.yml"))
                 .replace("estimated_cost_gt: 100000", "estimated_cost_gt: 200")
-                .replace("estimated_rows_gt: 1000000", "estimated_rows_gt: 2000");
+                .replace("estimated_rows_gt: 1000000", "estimated_rows_gt: 2000")
+                // CI boxes and loaded laptops are slow; the timeout path has its own unit tests
+                .replace("decision_timeout_ms: 1000", "decision_timeout_ms: 5000");
         Path tmp = Files.createTempFile("qg-rules", ".yml");
         Files.writeString(tmp, rules);
 

@@ -34,7 +34,11 @@ class DeciderTest {
     void setUp() throws Exception {
         QueryGuardConfig shipped = ConfigMapper.load(Path.of("../infra/rules/default-rules.yml"));
         // Masking off: this test is about cost rules, and there's no database for column metadata.
-        QueryGuardConfig config = shipped.withPolicy(shipped.roleMapping(), shipped.rules(), java.util.List.of());
+        // Generous decision timeout: a slow CI box must not turn this into a timeout test.
+        QueryGuardConfig config = new QueryGuardConfig(shipped.roleMapping(), shipped.defaultRole(),
+                new dev.queryguard.common.config.Settings(shipped.settings().onParseError(),
+                        shipped.settings().onCostError(), shipped.settings().explainTimeoutMs(), 60_000),
+                shipped.rules(), java.util.List.of());
         decider = new Decider(new PolicyHolder(ActivePolicy.of(1, config, "test")), explain, stats,
                 new MaskTargets(null), new ProxyMetrics());
     }
@@ -53,6 +57,7 @@ class DeciderTest {
 
     @Test
     void afterATimeoutExplainIsSkippedForAWhile() throws Exception {
+        decider.explainBackoff(java.time.Duration.ofMinutes(1));
         when(explain.estimate(anyString(), anyString())).thenThrow(new CostUnavailableException("EXPLAIN timed out"));
         when(stats.upperBound(anyString(), any())).thenReturn(new CostEstimate(10, 10, "table-stats"));
 

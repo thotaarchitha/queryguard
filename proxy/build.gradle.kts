@@ -29,8 +29,11 @@ application {
 }
 
 jmh {
-    warmupIterations.set(2)
+    warmupIterations.set(3)
+    warmup.set("3s")
     iterations.set(5)
+    timeOnIteration.set("4s")
     fork.set(1)
+    threads.set(1)
     resultFormat.set("JSON")
 }
