@@ -112,8 +112,8 @@ RESULTS.md breaks down where that CPU goes.
 
 ## The interesting parts
 
-- **[docs/design-decisions.md](docs/design-decisions.md)**: the trade-offs, written as answers to the
-  twelve questions I'd expect in an interview (fail-open vs fail-closed, why ClickHouse, scaling to 50K connections...).
+- **[docs/design-decisions.md](docs/design-decisions.md)**: the trade-offs, one question at a time
+  (fail-open vs fail-closed, why ClickHouse, scaling to 50K connections...).
 - **[docs/bug-journal.md](docs/bug-journal.md)**: what broke. The best one: under load, EXPLAIN timed out,
   the cost rules failed open, and the expensive queries they exist to stop made the overload worse.
 - **[docs/protocol-notes.md](docs/protocol-notes.md)**: real bytes of a Postgres startup, captured through the proxy.
