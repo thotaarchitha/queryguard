@@ -1,6 +1,6 @@
 # Bug journal
 
-Things that broke, how I noticed, and what I learned. Mostly for me, partly for interviews.
+Things that broke, how I noticed, and what I learned.
 
 ---
 
@@ -90,7 +90,7 @@ sending EXPLAINs for 2 s and goes straight to the estimate, so it isn't piling p
 struggling server. The error message says when it's an estimate.
 
 **Lesson.** Fail-open is only safe if what it lets through can't make the failure worse.
-This is the one I'd tell in an interview.
+This is the one that changed how I think about failure modes.
 
 ---
 
