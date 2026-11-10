@@ -1,7 +1,7 @@
 # Design decisions
 
-The calls I made, what each one cost, and the questions I'd expect in an interview, answered the way
-I'd answer them. Bugs that changed a decision are in [bug-journal.md](bug-journal.md); when a
+The calls I made, what each one cost, and the questions I kept asking myself while building it.
+Bugs that changed a decision are in [bug-journal.md](bug-journal.md); when a
 decision changed, the old reasoning stays here with the reason it changed.
 
 ---
