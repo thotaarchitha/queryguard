@@ -1,0 +1,5 @@
+# dbt writes these on every run
+target/
+logs/
+dbt_packages/
+.user.yml
