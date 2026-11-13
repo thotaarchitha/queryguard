@@ -6,11 +6,11 @@ select
     rule_id,
     rule_family,
     decision,
-    count()                                    as events,
-    uniqExact(db_user)                         as distinct_users,
-    uniqExact(fingerprint)                     as distinct_query_shapes,
+    count(*)                                   as events,
+    count(distinct db_user)                    as distinct_users,
+    count(distinct fingerprint)                as distinct_query_shapes,
     round(avg(decision_latency_us), 1)         as avg_decision_us,
-    sum(ifNull(estimated_cost, 0))             as total_estimated_cost
+    sum(coalesce(estimated_cost, 0))           as total_estimated_cost
 from {{ ref('stg_query_events') }}
 where decision != 'ALLOW'
 group by event_date, role, rule_id, rule_family, decision

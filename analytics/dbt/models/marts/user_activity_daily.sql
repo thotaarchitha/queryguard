@@ -5,12 +5,12 @@ select
     event_date,
     db_user,
     role,
-    count()                                              as queries,
-    countIf(is_blocked)                                  as blocked,
-    countIf(is_blocked and rule_family = 'policy')       as policy_blocks,
-    countIf(is_blocked and rule_family = 'masking')      as masking_guard_hits,
-    countIf(touched_masked_data)                         as masked_reads,
-    countIf(error_code != '' and not is_blocked)         as database_errors,
-    sum(ifNull(rows_returned, 0))                        as rows_returned
+    count(*)                                                        as queries,
+    {{ count_if('is_blocked') }}                                    as blocked,
+    {{ count_if("is_blocked and rule_family = 'policy'") }}         as policy_blocks,
+    {{ count_if("is_blocked and rule_family = 'masking'") }}        as masking_guard_hits,
+    {{ count_if('touched_masked_data') }}                           as masked_reads,
+    {{ count_if("error_code != '' and not is_blocked") }}           as database_errors,
+    sum(coalesce(rows_returned, 0))                                 as rows_returned
 from {{ ref('stg_query_events') }}
 group by event_date, db_user, role
