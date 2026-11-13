@@ -9,3 +9,17 @@ queryguard:
       password: "{{ env_var('CLICKHOUSE_PASSWORD', 'qg') }}"
       schema: qg
       threads: 4
+
+    # dbt build --target snowflake. Setup and loading: analytics/snowflake/README.md.
+    # Key-pair auth for a service user: Snowflake is phasing out passwords without MFA, and
+    # an MFA prompt on every dbt run would make this unusable.
+    snowflake:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+      user: "{{ env_var('SNOWFLAKE_USER', 'QG_DBT_USER') }}"
+      private_key_path: "{{ env_var('SNOWFLAKE_PRIVATE_KEY_PATH') }}"
+      role: QG_DBT
+      warehouse: QG_WH
+      database: QUERYGUARD
+      schema: qg
+      threads: 4
