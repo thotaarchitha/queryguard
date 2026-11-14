@@ -84,9 +84,9 @@ Every change is versioned and audited. `POST /rules/test` dry-runs a query again
 
 **Analytics.** Every decision becomes an event (normalized SQL only, never values) → Kafka →
 ClickHouse (MergeTree + hourly and per-shape rollups) → Grafana, plus dbt marts with tests.
-The same dbt project is ported to Snowflake (Parquet export, COPY INTO, ClickHouse-only SQL behind
-one macro file). It compiles and is checked; it hasn't run on a live account yet
-([analytics/snowflake](analytics/snowflake/README.md)).
+The same dbt project also runs on Snowflake: 3.75M events loaded with COPY INTO from Parquet,
+19/19 dbt tests passing, and marts identical to ClickHouse's, with the ClickHouse-only SQL behind
+one macro file ([analytics/snowflake](analytics/snowflake/README.md)).
 
 ## How a query gets through
 

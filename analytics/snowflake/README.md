@@ -51,23 +51,36 @@ python load_events.py load       # PUT to a stage, COPY INTO qg.query_events
 cd ../dbt && dbt build --target snowflake --profiles-dir .
 ```
 
-`load` is safe to rerun: COPY skips files it has already loaded.
+`load` is safe to rerun: COPY skips files it has already loaded. With PowerShell instead of
+bash, set the variables with `$env:SNOWFLAKE_ACCOUNT = "..."`.
 
 ## Results
 
-**Checked so far (no Snowflake account involved):**
+Run on a Snowflake trial account (AWS us-east-2, X-Small warehouse), November 2026:
 
-- `export` on the full ClickHouse table: 3,751,907 events in two daily files (52 MB and 129 MB,
-  Snappy), about 4 seconds. Every field the COPY reads is present, timestamps and arrays parse.
-- dbt on ClickHouse after the port: 19/19 passing. I built the old models first and diffed the
-  marts against the new ones. Identical except float sums differing in the 13th digit
-  (summation order), p95 (sampled, different every run), and `dim_query_shapes.statement_type`,
-  which the port fixed: some query shapes carry two labels, and `any()` picked one at random.
-  It now takes the newest label.
-- dbt compiles for Snowflake, and all 19 compiled statements parse as Snowflake SQL (sqlglot).
+| Step | Result |
+|---|---|
+| Export from ClickHouse | 3,751,907 events, two daily Parquet files (52 + 129 MB, Snappy), ~4 s |
+| `load` (PUT + COPY INTO) | all rows loaded, 0 rejected, 57 s end to end from my laptop; the COPY itself 18 s |
+| `dbt build --target snowflake` | **19/19 passing**, 24 s, first run |
+| Snowflake marts vs ClickHouse marts | **identical** on every column of all three marts, except p95 |
+| p95 latency | median 0.3% apart, worst 7% (both warehouses approximate it differently) |
 
-**Not yet:** a real `load` and `dbt build --target snowflake`. Load time, dbt run time and
-credits used go here once they've run.
+Most of the 57 s load is uploading 181 MB from a laptop; the warehouse only works during COPY.
+At X-Small (1 credit an hour, billed per second, 60 s minimum after each resume), the whole
+exercise is a few minutes of warehouse time, roughly 0.1 credit. I'll put the metered figure
+here once Snowflake's usage view catches up; it lags by a few hours.
+
+How I checked the port before any of that:
+
+- I built the **old** ClickHouse-only models first, then the new ones, and diffed the marts.
+  Same results except float sums differing in the 13th digit (summation order), the sampled
+  p95, and one real fix the diff turned up: some query shapes carry two `statement_type`
+  labels (VACUUM logged as ALTER before the MAINTENANCE kind existed, OTHER on timed-out
+  decisions), and `any()` picked one at random. It now takes the newest label.
+- Before the account existed, the Snowflake SQL was compiled and parsed with sqlglot, and the
+  Parquet files were checked against every field the COPY reads. The first real run passed,
+  which is the point of checking first.
 
 ## Differences worth knowing
 
