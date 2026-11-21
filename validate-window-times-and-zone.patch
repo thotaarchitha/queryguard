@@ -1,0 +1,121 @@
+diff --git a/common/src/main/java/dev/queryguard/common/config/RuleValidator.java b/common/src/main/java/dev/queryguard/common/config/RuleValidator.java
+index 7a8b71e..0957c29 100644
+--- a/common/src/main/java/dev/queryguard/common/config/RuleValidator.java
++++ b/common/src/main/java/dev/queryguard/common/config/RuleValidator.java
+@@ -5,17 +5,21 @@ import com.networknt.schema.JsonSchema;
+ import com.networknt.schema.JsonSchemaFactory;
+ import com.networknt.schema.SpecVersion;
+ import com.networknt.schema.ValidationMessage;
++import dev.queryguard.common.rules.MaintenanceWindow;
+ import dev.queryguard.common.rules.Rule;
+ import java.io.IOException;
+ import java.io.InputStream;
+ import java.io.UncheckedIOException;
++import java.time.DateTimeException;
++import java.time.LocalTime;
++import java.time.ZoneId;
+ import java.util.ArrayList;
+ import java.util.List;
+ import java.util.Set;
+ 
+ /**
+  * Checks a rule body against {@code rule.schema.json}, plus a few things a schema
+- * can't express cleanly (a REWRITE must say how).
++ * can't express cleanly (a REWRITE must say how, a window's times and zone must parse).
+  */
+ public final class RuleValidator {
+ 
+@@ -44,9 +48,38 @@ public final class RuleValidator {
+         if (rule.when() != null && rule.when().roles() != null && rule.when().rolesExcept() != null) {
+             errors.add("$.when: use roles or roles_except, not both");
+         }
++        if (rule.when() != null && rule.when().outsideWindow() != null) {
++            checkWindow(rule.when().outsideWindow(), errors);
++        }
+         return errors;
+     }
+ 
++    // The schema only checks the shape of these. A bad value would otherwise get saved and then
++    // throw inside the proxy every time the rule is evaluated.
++    private static void checkWindow(MaintenanceWindow w, List<String> errors) {
++        checkTime("from", w.from(), errors);
++        checkTime("to", w.to(), errors);
++        if (w.tz() != null) {
++            try {
++                ZoneId.of(w.tz());
++            } catch (DateTimeException e) {
++                errors.add("$.when.outside_window.tz: unknown time zone '" + w.tz()
++                        + "' (use an IANA name like 'America/New_York' or 'UTC')");
++            }
++        }
++    }
++
++    private static void checkTime(String field, String value, List<String> errors) {
++        if (value == null) {
++            return;
++        }
++        try {
++            LocalTime.parse(value);
++        } catch (DateTimeException e) {
++            errors.add("$.when.outside_window." + field + ": '" + value + "' isn't a valid time (00:00 to 23:59)");
++        }
++    }
++
+     private static JsonSchema loadSchema() {
+         try (InputStream in = RuleValidator.class.getResourceAsStream("/rule.schema.json")) {
+             if (in == null) {
+diff --git a/common/src/test/java/dev/queryguard/common/config/RuleValidatorTest.java b/common/src/test/java/dev/queryguard/common/config/RuleValidatorTest.java
+new file mode 100644
+index 0000000..fb4069c
+--- /dev/null
++++ b/common/src/test/java/dev/queryguard/common/config/RuleValidatorTest.java
+@@ -0,0 +1,49 @@
++package dev.queryguard.common.config;
++
++import static org.assertj.core.api.Assertions.assertThat;
++
++import com.fasterxml.jackson.databind.JsonNode;
++import java.util.List;
++import org.junit.jupiter.api.Test;
++
++class RuleValidatorTest {
++
++    private static JsonNode ruleWithWindow(String window) throws Exception {
++        return ConfigMapper.json().readTree("""
++                {"id": "R9", "action": "BLOCK",
++                 "when": {"statement": ["DELETE"], "outside_window": %s}}
++                """.formatted(window));
++    }
++
++    @Test
++    void acceptsAValidWindow() throws Exception {
++        JsonNode rule = ruleWithWindow("""
++                {"days": ["SAT"], "from": "22:00", "to": "02:00", "tz": "Asia/Kolkata"}""");
++        assertThat(RuleValidator.validate(rule)).isEmpty();
++    }
++
++    @Test
++    void rejectsHoursPastTwentyThree() throws Exception {
++        // "25:00" gets past the schema's pattern but LocalTime can't parse it
++        JsonNode rule = ruleWithWindow("""
++                {"from": "02:00", "to": "25:00"}""");
++        assertThat(RuleValidator.validate(rule))
++                .containsExactly("$.when.outside_window.to: '25:00' isn't a valid time (00:00 to 23:59)");
++    }
++
++    @Test
++    void rejectsUnknownTimeZone() throws Exception {
++        JsonNode rule = ruleWithWindow("""
++                {"from": "02:00", "to": "04:00", "tz": "America/NewYork"}""");
++        List<String> errors = RuleValidator.validate(rule);
++        assertThat(errors).hasSize(1);
++        assertThat(errors.get(0)).startsWith("$.when.outside_window.tz: unknown time zone 'America/NewYork'");
++    }
++
++    @Test
++    void reportsBothBadTimesAtOnce() throws Exception {
++        JsonNode rule = ruleWithWindow("""
++                {"from": "24:00", "to": "29:59"}""");
++        assertThat(RuleValidator.validate(rule)).hasSize(2);
++    }
++}

@@ -5,17 +5,21 @@ import com.networknt.schema.JsonSchema;
 import com.networknt.schema.JsonSchemaFactory;
 import com.networknt.schema.SpecVersion;
 import com.networknt.schema.ValidationMessage;
+import dev.queryguard.common.rules.MaintenanceWindow;
 import dev.queryguard.common.rules.Rule;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.time.DateTimeException;
+import java.time.LocalTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
 /**
  * Checks a rule body against {@code rule.schema.json}, plus a few things a schema
- * can't express cleanly (a REWRITE must say how).
+ * can't express cleanly (a REWRITE must say how, a window's times and zone must parse).
  */
 public final class RuleValidator {
 
@@ -44,7 +48,36 @@ public final class RuleValidator {
         if (rule.when() != null && rule.when().roles() != null && rule.when().rolesExcept() != null) {
             errors.add("$.when: use roles or roles_except, not both");
         }
+        if (rule.when() != null && rule.when().outsideWindow() != null) {
+            checkWindow(rule.when().outsideWindow(), errors);
+        }
         return errors;
+    }
+
+    // The schema only checks the shape of these. A bad value would otherwise get saved and then
+    // throw inside the proxy every time the rule is evaluated.
+    private static void checkWindow(MaintenanceWindow w, List<String> errors) {
+        checkTime("from", w.from(), errors);
+        checkTime("to", w.to(), errors);
+        if (w.tz() != null) {
+            try {
+                ZoneId.of(w.tz());
+            } catch (DateTimeException e) {
+                errors.add("$.when.outside_window.tz: unknown time zone '" + w.tz()
+                        + "' (use an IANA name like 'America/New_York' or 'UTC')");
+            }
+        }
+    }
+
+    private static void checkTime(String field, String value, List<String> errors) {
+        if (value == null) {
+            return;
+        }
+        try {
+            LocalTime.parse(value);
+        } catch (DateTimeException e) {
+            errors.add("$.when.outside_window." + field + ": '" + value + "' isn't a valid time (00:00 to 23:59)");
+        }
     }
 
     private static JsonSchema loadSchema() {
